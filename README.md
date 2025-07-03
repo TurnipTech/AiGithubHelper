@@ -8,6 +8,7 @@ A webhook-based automation system that uses AI (Claude Code) to perform automate
 - **GitHub CLI Integration**: Uses `gh` commands to interact with GitHub
 - **Simple Setup**: Minimal configuration required
 - **Webhook Driven**: Responds to GitHub PR events in real-time
+- sOm3 spolling mestakes aRe heer, will it bee picked up?
 
 ## Prerequisites
 
