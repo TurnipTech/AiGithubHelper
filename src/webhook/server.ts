@@ -2,13 +2,16 @@ import express from 'express';
 import { createPullRequestHandler } from './handlers/pull-request';
 import { createIssueHandler } from './handlers/issue';
 import { createPushHandler } from './handlers/push';
+import { verifyWebhookSignature } from './middleware/auth';
+import { environment, validateEnvironment } from '../config/environment';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.post('/webhook', (req, res) => {
+validateEnvironment();
+
+app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), (req, res) => {
   try {
     const eventType = req.headers['x-github-event'] as string;
     const payload = req.body;
@@ -41,8 +44,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Webhook server running on port ${PORT}`);
+app.listen(environment.port, () => {
+  console.log(`Webhook server running on port ${environment.port}`);
 });
 
 export default app;
