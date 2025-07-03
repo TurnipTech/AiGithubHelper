@@ -65,12 +65,13 @@ export const codeReviewerScript: AIAutomationScript = {
       };
       
     } catch (error) {
-      logger.error(`Error during code review: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`Error during code review: ${errorMessage}`);
       
       return {
         success: false,
-        message: `Code review failed: ${error.message}`,
-        error: error.message
+        message: `Code review failed: ${errorMessage}`,
+        error: errorMessage
       };
     }
   },

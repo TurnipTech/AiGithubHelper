@@ -10,17 +10,19 @@ export function verifyWebhookSignature(secret: string) {
       const signature = req.headers['x-hub-signature-256'] as string;
       
       if (!signature) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Missing signature header',
           message: 'No X-Hub-Signature-256 header found in request'
         });
+        return;
       }
 
       if (!secret) {
-        return res.status(500).json({ 
+        res.status(500).json({ 
           error: 'Server configuration error',
           message: 'Webhook secret not configured'
         });
+        return;
       }
 
       const payload = JSON.stringify(req.body);
@@ -29,16 +31,17 @@ export function verifyWebhookSignature(secret: string) {
         .digest('hex');
 
       if (!verifySignature(signature, expectedSignature)) {
-        return res.status(401).json({ 
+        res.status(401).json({ 
           error: 'Invalid signature',
           message: 'Webhook signature verification failed'
         });
+        return;
       }
 
       next();
     } catch (error) {
       console.error('Webhook signature verification error:', error);
-      return res.status(500).json({ 
+      res.status(500).json({ 
         error: 'Internal server error',
         message: 'Failed to verify webhook signature'
       });

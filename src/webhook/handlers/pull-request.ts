@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { WebhookEvent } from '@octokit/webhooks-types';
 import { AIScriptContext } from '../../ai-scripts/script-interface';
 import { codeReviewerScript } from '../../ai-scripts/code-reviewer';
 import { AICLIExecutor } from '../../ai-cli/executor';
@@ -15,7 +14,7 @@ export class PullRequestHandler {
     private config: Config
   ) {}
 
-  async handlePullRequest(payload: WebhookEvent, req: Request, res: Response): Promise<void> {
+  async handlePullRequest(payload: any, req: Request, res: Response): Promise<void> {
     if (payload.action !== 'opened' && payload.action !== 'synchronize') {
       this.logger.info(`Ignoring PR action: ${payload.action}`);
       res.status(200).json({ message: 'Event ignored' });
@@ -29,7 +28,7 @@ export class PullRequestHandler {
 
     try {
       // Validate the payload
-      if (!codeReviewerScript.validate(payload)) {
+      if (!codeReviewerScript.validate || !codeReviewerScript.validate(payload)) {
         this.logger.error('Invalid payload for code review');
         res.status(400).json({ error: 'Invalid payload' });
         return;
@@ -63,11 +62,26 @@ export class PullRequestHandler {
       }
 
     } catch (error) {
-      this.logger.error(`Error handling PR event: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Error handling PR event: ${errorMessage}`);
       res.status(500).json({
         error: 'Internal server error',
-        message: error.message
+        message: errorMessage
       });
     }
   }
+}
+
+export function createPullRequestHandler(payload: any) {
+  console.log('Processing pull request event...');
+  
+  const action = payload.action;
+  const pullRequest = payload.pull_request;
+  const repository = payload.repository;
+  
+  console.log(`Pull request ${action}:`);
+  console.log(`- Repository: ${repository.full_name}`);
+  console.log(`- PR #${pullRequest.number}: ${pullRequest.title}`);
+  console.log(`- Author: ${pullRequest.user.login}`);
+  console.log(`- State: ${pullRequest.state}`);
 }
