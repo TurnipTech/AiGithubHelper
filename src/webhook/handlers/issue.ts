@@ -138,7 +138,8 @@ export class IssueHandler {
       // Create a comprehensive prompt for issue analysis and code generation
       const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment, repoPath);
       
-      const tempPromptFile = resolve(tempWorkDir, `issue-prompt-${issue.number}.md`);
+      // Write prompt file inside the cloned repository so AI can access it
+      const tempPromptFile = resolve(repoPath, `issue-prompt-${issue.number}.md`);
       
       // Write file with proper error handling
       try {
@@ -155,8 +156,8 @@ export class IssueHandler {
       this.logger.info(`Working directory: ${workingDir}`);
       this.logger.info(`Temp prompt file: ${tempPromptFile}`);
       
-      // Create a simple prompt that references the temp file
-      const simplePrompt = `Please read and execute the instructions in the file: ${tempPromptFile}`;
+      // Create a simple prompt that references the temp file (now inside the repo)
+      const simplePrompt = `Please read and execute the instructions in the file: issue-prompt-${issue.number}.md`;
       
       this.logger.info(`Starting AI issue analysis in background...`);
       
