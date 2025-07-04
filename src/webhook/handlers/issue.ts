@@ -96,14 +96,13 @@ export class IssueHandler {
       
       this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
       
-      // Clone the repository to the temporary directory
-      const repoUrl = `https://github.com/${repository.full_name}.git`;
+      // Clone the repository using GitHub CLI (already authenticated)
       const repoPath = resolve(tempWorkDir, repository.name);
       
-      this.logger.info(`Cloning repository ${repoUrl} to ${repoPath}`);
+      this.logger.info(`Cloning repository ${repository.full_name} to ${repoPath}`);
       
-      // Clone the repository
-      const gitClone = spawn('git', ['clone', repoUrl, repoPath], {
+      // Clone the repository using gh CLI
+      const ghClone = spawn('gh', ['repo', 'clone', repository.full_name, repoPath], {
         stdio: ['pipe', 'pipe', 'pipe']
       });
       
@@ -111,26 +110,26 @@ export class IssueHandler {
         let cloneOutput = '';
         let cloneError = '';
         
-        gitClone.stdout.on('data', (data) => {
+        ghClone.stdout.on('data', (data) => {
           cloneOutput += data.toString();
         });
         
-        gitClone.stderr.on('data', (data) => {
+        ghClone.stderr.on('data', (data) => {
           cloneError += data.toString();
         });
         
-        gitClone.on('close', (code) => {
+        ghClone.on('close', (code) => {
           if (code === 0) {
             this.logger.info(`Successfully cloned repository: ${cloneOutput}`);
             resolve();
           } else {
             this.logger.error(`Failed to clone repository: ${cloneError}`);
-            reject(new Error(`Git clone failed with code ${code}: ${cloneError}`));
+            reject(new Error(`GitHub CLI clone failed with code ${code}: ${cloneError}`));
           }
         });
         
-        gitClone.on('error', (error) => {
-          this.logger.error(`Git clone spawn error: ${error.message}`);
+        ghClone.on('error', (error) => {
+          this.logger.error(`GitHub CLI clone spawn error: ${error.message}`);
           reject(error);
         });
       });
