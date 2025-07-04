@@ -42,8 +42,18 @@ TEMP_VALIDATED_FILE=$(mktemp -t "pr-validated-XXXXXX") || { echo "Error: Failed 
 trap "rm -f '$TEMP_COMMENTS_FILE' '$TEMP_VALIDATED_FILE'" EXIT
 
 # First pass: validate and collect all comments
-while IFS=':' read -r file_path line_number comment_body; do
+while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines
+    if [ -z "$line" ]; then
+        continue
+    fi
+    
+    # Split line on first two colons to handle file paths with colons
+    file_path=$(echo "$line" | cut -d: -f1)
+    line_number=$(echo "$line" | cut -d: -f2)
+    comment_body=$(echo "$line" | cut -d: -f3-)
+    
+    # Skip if any part is empty
     if [ -z "$file_path" ] || [ -z "$line_number" ] || [ -z "$comment_body" ]; then
         continue
     fi
@@ -61,7 +71,7 @@ done < "$COMMENTS_FILE"
 # Second pass: build JSON array efficiently using jq with all comments at once
 if [ -s "$TEMP_VALIDATED_FILE" ]; then
     # Process all comments in a single jq call for better performance
-    jq -n '[
+    jq -R -n '[
         inputs | 
         split("\t") | 
         {

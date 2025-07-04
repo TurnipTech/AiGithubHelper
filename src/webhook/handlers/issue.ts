@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
+import { AIProviderFactory } from '../../ai/factory';
 
 interface GitHubUser {
   login: string;
@@ -157,18 +158,14 @@ export class IssueHandler {
       // Create a simple prompt that references the temp file
       const simplePrompt = `Please read and execute the instructions in the file: ${tempPromptFile}`;
       
-      this.logger.info(`Starting Claude issue analysis in background...`);
+      this.logger.info(`Starting AI issue analysis in background...`);
       
-      // Start Claude process with proper process management
-      const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
-        cwd: workingDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: false // Don't detach to prevent zombie processes
-      });
+      // Get AI provider based on configuration
+      const aiProvider = await AIProviderFactory.create(this.config.ai.preferredProvider, this.config.ai.fallbackEnabled);
+      this.logger.info(`Using AI provider: ${aiProvider.name}`);
       
-      // Write the simple prompt to stdin
-      child.stdin.write(simplePrompt);
-      child.stdin.end();
+      // Start AI process with proper process management
+      const child = await aiProvider.execute(simplePrompt, workingDir);
       
       // Set up proper cleanup handlers
       let isCleanedUp = false;
@@ -204,28 +201,28 @@ export class IssueHandler {
       
       // Set up timeout to prevent hanging processes
       const timeout = setTimeout(() => {
-        this.logger.warn(`Claude process timeout, killing process`);
+        this.logger.warn(`AI process timeout, killing process`);
         cleanup();
       }, 10 * 60 * 1000); // 10 minutes timeout
       
       // Log output for debugging but don't wait for completion
-      child.stdout.on('data', (data) => {
-        this.logger.info(`Claude stdout: ${data.toString()}`);
+      child.stdout?.on('data', (data) => {
+        this.logger.info(`AI stdout: ${data.toString()}`);
       });
       
-      child.stderr.on('data', (data) => {
-        this.logger.error(`Claude stderr: ${data.toString()}`);
+      child.stderr?.on('data', (data) => {
+        this.logger.error(`AI stderr: ${data.toString()}`);
       });
       
       child.on('close', (code) => {
         clearTimeout(timeout);
-        this.logger.info(`Claude process exited with code ${code}`);
+        this.logger.info(`AI process exited with code ${code}`);
         cleanup();
       });
       
       child.on('error', (error) => {
         clearTimeout(timeout);
-        this.logger.error(`Claude spawn error: ${error.message}`);
+        this.logger.error(`AI spawn error: ${error.message}`);
         cleanup();
       });
       
@@ -234,7 +231,7 @@ export class IssueHandler {
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
 
-      this.logger.info(`Claude issue analysis started for issue #${issue.number}`);
+      this.logger.info(`AI issue analysis started for issue #${issue.number}`);
       
       res.status(200).json({
         message: 'Issue analysis and code generation started',
