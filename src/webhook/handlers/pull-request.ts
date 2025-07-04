@@ -56,9 +56,9 @@ export class PullRequestHandler {
 
       this.logger.info(`Executing ${aiProvider.name} directly`);
       this.logger.info(`Working directory: ${workingDir}`);
-      
+
       this.logger.info(`About to execute ${aiProvider.name} with spawn...`);
-      
+
       this.logger.info(`Starting AI review in background...`);
 
       // Start AI process without awaiting - fire and forget
