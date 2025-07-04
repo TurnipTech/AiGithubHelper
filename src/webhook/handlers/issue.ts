@@ -3,7 +3,7 @@ import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { spawn } from 'child_process';
 import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { resolve } from 'path';
 import { tmpdir } from 'os';
 
 interface GitHubUser {
@@ -100,7 +100,9 @@ export class IssueHandler {
       const tempPromptFile = resolve(tempDir, `issue-prompt-${issue.number}-${Date.now()}.md`);
       
       // Validate that the file path is within the temp directory (prevent path traversal)
-      if (!tempPromptFile.startsWith(tempDir)) {
+      const normalizedTempFile = resolve(tempPromptFile);
+      const normalizedTempDir = resolve(tempDir);
+      if (!normalizedTempFile.startsWith(normalizedTempDir + '/') && normalizedTempFile !== normalizedTempDir) {
         throw new Error('Invalid file path: potential path traversal attack');
       }
       
@@ -136,7 +138,11 @@ export class IssueHandler {
       child.stdin.end();
       
       // Set up proper cleanup handlers
+      let isCleanedUp = false;
       const cleanup = () => {
+        if (isCleanedUp) return; // Prevent multiple cleanup calls
+        isCleanedUp = true;
+        
         try {
           if (!child.killed) {
             child.kill('SIGTERM');
@@ -150,6 +156,15 @@ export class IssueHandler {
           this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
         } catch (e) {
           this.logger.warn(`Failed to clean up temp file: ${tempPromptFile} - ${e}`);
+        }
+        
+        // Remove event listeners to prevent memory leaks
+        try {
+          process.off('exit', cleanup);
+          process.off('SIGINT', cleanup);
+          process.off('SIGTERM', cleanup);
+        } catch (e) {
+          this.logger.warn(`Failed to remove process listeners: ${e}`);
         }
       };
       
@@ -171,14 +186,7 @@ export class IssueHandler {
       child.on('close', (code) => {
         clearTimeout(timeout);
         this.logger.info(`Claude process exited with code ${code}`);
-        
-        // Clean up temp file after Claude finishes
-        try {
-          unlinkSync(tempPromptFile);
-          this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
-        } catch (e) {
-          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile} - ${e}`);
-        }
+        cleanup();
       });
       
       child.on('error', (error) => {
@@ -187,7 +195,7 @@ export class IssueHandler {
         cleanup();
       });
       
-      // Handle process exit cleanup
+      // Handle process exit cleanup (will be removed in cleanup function)
       process.on('exit', cleanup);
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
