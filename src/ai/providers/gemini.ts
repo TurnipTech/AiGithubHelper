@@ -8,71 +8,83 @@ const execAsync = promisify(exec);
 export class GeminiProvider implements AIProvider {
   public readonly name = 'gemini';
   private primaryModel = 'gemini-2.5-pro';
-  private fallbackModel = 'gemini-1.5-flash';
+  private fallbackModel = 'gemini-2.5-flash';
 
   async execute(prompt: string, workingDir: string): Promise<ChildProcess> {
+    // Try primary model first
+    try {
+      const primaryChild = await this.tryModel(this.primaryModel, prompt, workingDir);
+      if (primaryChild) {
+        return primaryChild;
+      }
+    } catch (error) {
+      console.log(`Primary model ${this.primaryModel} failed, trying fallback...`);
+    }
+    
+    // Fall back to Flash model
+    try {
+      const fallbackChild = await this.tryModel(this.fallbackModel, prompt, workingDir);
+      if (fallbackChild) {
+        console.log(`Successfully fell back to ${this.fallbackModel}`);
+        return fallbackChild;
+      }
+    } catch (error) {
+      console.log(`Fallback model ${this.fallbackModel} also failed`);
+    }
+    
+    throw new Error(`Both ${this.primaryModel} and ${this.fallbackModel} failed`);
+  }
+  
+  private async tryModel(model: string, prompt: string, workingDir: string): Promise<ChildProcess> {
     return new Promise((resolve, reject) => {
-      let resolved = false;
-      
-      // Start with primary model
-      const child = spawn('gemini', ['--model', this.primaryModel, '--yolo', '--prompt', ''], {
+      const child = spawn('gemini', ['--model', model, '--yolo', '--prompt', ''], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: false
       });
       
       let stderrBuffer = '';
-      let quotaExceededDetected = false;
+      let resolved = false;
+      
+      // Set up a timeout to determine if the process is working
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve(child);
+        }
+      }, 5000); // 5 second timeout
       
       child.stderr.on('data', (data) => {
         stderrBuffer += data.toString();
         
-        // Check for quota exceeded errors early
-        if (!quotaExceededDetected && (
-          stderrBuffer.includes('Quota exceeded') ||
-          stderrBuffer.includes('status 429') ||
-          stderrBuffer.includes('rateLimitExceeded')
-        )) {
-          quotaExceededDetected = true;
-          console.log(`Gemini Pro quota exceeded, falling back to ${this.fallbackModel}...`);
-          
-          // Kill the failing process
-          try {
-            child.kill('SIGTERM');
-          } catch (e) {
-            // Ignore kill errors
-          }
-          
-          // Start fallback process
-          const fallbackChild = spawn('gemini', ['--model', this.fallbackModel, '--yolo', '--prompt', ''], {
-            cwd: workingDir,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            detached: false
-          });
-          
-          fallbackChild.stdin.write(prompt);
-          fallbackChild.stdin.end();
-          
+        // Check for quota exceeded or other critical errors
+        if (stderrBuffer.includes('Quota exceeded') || 
+            stderrBuffer.includes('status 429') || 
+            stderrBuffer.includes('rateLimitExceeded') ||
+            stderrBuffer.includes('NOT_FOUND') ||
+            stderrBuffer.includes('API Error')) {
+          clearTimeout(timeout);
           if (!resolved) {
             resolved = true;
-            resolve(fallbackChild);
+            child.kill('SIGTERM');
+            reject(new Error(`Model ${model} failed: ${stderrBuffer}`));
           }
         }
       });
       
-      // Handle normal completion (no quota issues)
-      child.on('spawn', () => {
-        if (!resolved && !quotaExceededDetected) {
-          resolved = true;
-          resolve(child);
-        }
-      });
-      
-      // Handle spawn errors
       child.on('error', (error) => {
+        clearTimeout(timeout);
         if (!resolved) {
           resolved = true;
           reject(error);
+        }
+      });
+      
+      child.on('exit', (code) => {
+        clearTimeout(timeout);
+        if (!resolved && code !== 0) {
+          resolved = true;
+          reject(new Error(`Model ${model} exited with code ${code}`));
         }
       });
       
