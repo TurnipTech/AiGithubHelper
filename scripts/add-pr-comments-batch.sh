@@ -17,6 +17,17 @@ REPO_NAME="$1"
 PR_NUMBER="$2"
 COMMENTS_FILE="$3"
 
+# Input validation
+if [[ ! "$REPO_NAME" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: Invalid repository name format. Expected: owner/repo"
+    exit 1
+fi
+
+if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Error: PR number must be a positive integer"
+    exit 1
+fi
+
 if [ ! -f "$COMMENTS_FILE" ]; then
     echo "Error: Comments file '$COMMENTS_FILE' not found"
     exit 1
@@ -25,9 +36,12 @@ fi
 # Start building the JSON payload
 echo "Creating batch review with inline comments..."
 
-# Build the comments array
-COMMENTS_JSON=""
-FIRST=true
+# Create a temporary file to store comment data for jq
+TEMP_COMMENTS_FILE=$(mktemp)
+trap "rm -f '$TEMP_COMMENTS_FILE'" EXIT
+
+# Read and validate comments, building a JSON array
+echo "[]" > "$TEMP_COMMENTS_FILE"
 
 while IFS=':' read -r file_path line_number comment_body; do
     # Skip empty lines
@@ -41,37 +55,24 @@ while IFS=':' read -r file_path line_number comment_body; do
         continue
     fi
     
-    # Add comma if not first comment
-    if [ "$FIRST" = false ]; then
-        COMMENTS_JSON+=","
-    fi
-    FIRST=false
-    
-    # Escape quotes in comment body
-    escaped_comment=$(echo "$comment_body" | sed 's/"/\\"/g')
-    
-    # Add comment to JSON
-    COMMENTS_JSON+=$(cat <<EOF
-
-    {
-      "path": "$file_path",
-      "line": $line_number,
-      "body": "$escaped_comment"
-    }
-EOF
-    )
+    # Add comment to JSON array using jq for safe construction
+    jq --arg path "$file_path" \
+       --argjson line "$line_number" \
+       --arg body "$comment_body" \
+       '. += [{path: $path, line: $line, body: $body}]' \
+       "$TEMP_COMMENTS_FILE" > "$TEMP_COMMENTS_FILE.tmp" && mv "$TEMP_COMMENTS_FILE.tmp" "$TEMP_COMMENTS_FILE"
 done < "$COMMENTS_FILE"
 
-# Create the full JSON payload
-JSON_PAYLOAD=$(cat <<EOF
-{
-  "body": "Automated code review with inline comments",
-  "event": "COMMENT",
-  "comments": [$COMMENTS_JSON
-  ]
-}
-EOF
-)
+# Create the full JSON payload using jq
+JSON_PAYLOAD=$(jq -n \
+  --arg body "Automated code review with inline comments" \
+  --arg event "COMMENT" \
+  --slurpfile comments "$TEMP_COMMENTS_FILE" \
+  '{
+    body: $body,
+    event: $event,
+    comments: $comments[0]
+  }')
 
 # Submit the review
 echo "$JSON_PAYLOAD" | gh api repos/"$REPO_NAME"/pulls/"$PR_NUMBER"/reviews \

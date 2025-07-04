@@ -43,21 +43,24 @@ if [[ -z "$COMMENT_BODY" ]]; then
     exit 1
 fi
 
-# Create the JSON payload
-JSON_PAYLOAD=$(cat <<EOF
-{
-  "body": "Automated code review comment",
-  "event": "COMMENT",
-  "comments": [
-    {
-      "path": "$FILE_PATH",
-      "line": $LINE_NUMBER,
-      "body": "$COMMENT_BODY"
-    }
-  ]
-}
-EOF
-)
+# Create the JSON payload using jq for safe JSON construction
+JSON_PAYLOAD=$(jq -n \
+  --arg body "Automated code review comment" \
+  --arg event "COMMENT" \
+  --arg path "$FILE_PATH" \
+  --argjson line "$LINE_NUMBER" \
+  --arg comment_body "$COMMENT_BODY" \
+  '{
+    body: $body,
+    event: $event,
+    comments: [
+      {
+        path: $path,
+        line: $line,
+        body: $comment_body
+      }
+    ]
+  }')
 
 # Submit the comment
 echo "$JSON_PAYLOAD" | gh api repos/"$REPO_NAME"/pulls/"$PR_NUMBER"/reviews \
