@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -31,7 +31,7 @@ export class PullRequestHandler {
     this.logger.info(`Processing PR ${payload.action} event for #${prNumber} in ${repoName}`);
 
     try {
-      // Read the prompt template
+      // Read the main prompt template
       const promptTemplatePath = join(__dirname, '../../ai-scripts/code-reviewer/prompts.md');
       const promptTemplate = readFileSync(promptTemplatePath, 'utf8');
 
@@ -44,34 +44,69 @@ export class PullRequestHandler {
         .replace(/\{\{baseBranch\}\}/g, baseBranch)
         .replace(/\{\{headBranch\}\}/g, headBranch);
 
-      // Create temporary prompt file
-      const tempPromptFile = join(__dirname, `../../temp-prompt-${prNumber}-${Date.now()}.md`);
+      // Create temporary prompt file outside src directory
+      const tempPromptFile = join(process.cwd(), `temp-prompt-${prNumber}-${Date.now()}.md`);
       writeFileSync(tempPromptFile, processedPrompt);
 
-      // Execute bash script
-      const scriptPath = join(__dirname, '../../../scripts/run-claude-review.sh');
+      // Execute Claude CLI directly instead of using bash script
       const workingDir = this.config.ai.workingDir;
       
-      const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempPromptFile}" "${workingDir}"`);
+      this.logger.info(`Executing Claude directly`);
+      this.logger.info(`Working directory: ${workingDir}`);
+      this.logger.info(`Temp prompt file: ${tempPromptFile}`);
+      
+      this.logger.info(`About to execute Claude with spawn...`);
+      
+      // Create a simple prompt that references the temp file
+      const simplePrompt = `Please read and execute the instructions in the file: ${tempPromptFile}`;
+      
+      this.logger.info(`Starting Claude review in background...`);
+      
+      // Start Claude process without awaiting - fire and forget
+      const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
+        cwd: workingDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true // Run detached so it continues after webhook returns
+      });
+      
+      // Write the simple prompt to stdin
+      child.stdin.write(simplePrompt);
+      child.stdin.end();
+      
+      // Log output for debugging but don't wait for completion
+      child.stdout.on('data', (data) => {
+        this.logger.info(`Claude stdout: ${data.toString()}`);
+      });
+      
+      child.stderr.on('data', (data) => {
+        this.logger.error(`Claude stderr: ${data.toString()}`);
+      });
+      
+      child.on('close', (code) => {
+        this.logger.info(`Claude process exited with code ${code}`);
+        
+        // Clean up temp file after Claude finishes
+        try {
+          require('fs').unlinkSync(tempPromptFile);
+          this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
+        } catch (e) {
+          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile}`);
+        }
+      });
+      
+      child.on('error', (error) => {
+        this.logger.error(`Claude spawn error: ${error.message}`);
+      });
+      
+      // Unref the child process so it doesn't keep the parent alive
+      child.unref();
 
-      if (stderr && stderr.trim()) {
-        this.logger.error(`Script stderr: ${stderr}`);
-      }
-
-      this.logger.info(`Code review completed successfully for PR #${prNumber}`);
-      this.logger.info(`Script output: ${stdout}`);
+      this.logger.info(`Claude review started for PR #${prNumber}`);
       
       res.status(200).json({
-        message: 'Code review completed',
-        output: stdout
+        message: 'Code review started',
+        prNumber: prNumber
       });
-
-      // Clean up temp file
-      try {
-        require('fs').unlinkSync(tempPromptFile);
-      } catch (e) {
-        this.logger.warn(`Failed to clean up temp file: ${tempPromptFile}`);
-      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

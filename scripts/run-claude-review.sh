@@ -17,19 +17,26 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 if [ ! -d "$WORKING_DIR" ]; then
-    echo "Error: Working directory not found: $WORKING_DIR"
-    exit 1
+    echo "Creating working directory: $WORKING_DIR"
+    mkdir -p "$WORKING_DIR"
 fi
 
 # Change to working directory
+echo "Changing to working directory: $WORKING_DIR"
 cd "$WORKING_DIR" || exit 1
 
 # Read the prompt from file and execute Claude CLI
 echo "Starting Claude code review..."
 echo "Working directory: $(pwd)"
 echo "Prompt file: $PROMPT_FILE"
+echo "Prompt content preview:"
+echo "--- START PROMPT ---"
+head -n 10 "$PROMPT_FILE"
+echo "--- END PROMPT PREVIEW ---"
 
+echo "Executing Claude CLI..."
 # Execute Claude CLI with the prompt
 claude --print --dangerously-skip-permissions "$(cat "$PROMPT_FILE")"
+echo "Claude CLI execution finished."
 
 echo "Claude review completed."
