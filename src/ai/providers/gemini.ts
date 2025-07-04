@@ -11,37 +11,74 @@ export class GeminiProvider implements AIProvider {
   private fallbackModel = 'gemini-1.5-flash';
 
   async execute(prompt: string, workingDir: string): Promise<ChildProcess> {
-    // Try primary model first, with fallback to flash model if usage limits hit
-    let child = await this.tryExecuteWithModel(prompt, workingDir, this.primaryModel);
-    
-    // If primary model fails (possibly due to usage limits), try fallback
-    if (!child) {
-      child = await this.tryExecuteWithModel(prompt, workingDir, this.fallbackModel);
-    }
-    
-    if (!child) {
-      throw new Error('Failed to execute with both Gemini pro and flash models');
-    }
-    
-    return child;
-  }
-
-  private async tryExecuteWithModel(prompt: string, workingDir: string, model: string): Promise<ChildProcess | null> {
-    try {
-      const child = spawn('gemini', ['--model', model, '--yolo', '--prompt', ''], {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      
+      // Start with primary model
+      const child = spawn('gemini', ['--model', this.primaryModel, '--yolo', '--prompt', ''], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: false
       });
       
+      let stderrBuffer = '';
+      let quotaExceededDetected = false;
+      
+      child.stderr.on('data', (data) => {
+        stderrBuffer += data.toString();
+        
+        // Check for quota exceeded errors early
+        if (!quotaExceededDetected && (
+          stderrBuffer.includes('Quota exceeded') ||
+          stderrBuffer.includes('status 429') ||
+          stderrBuffer.includes('rateLimitExceeded')
+        )) {
+          quotaExceededDetected = true;
+          console.log(`Gemini Pro quota exceeded, falling back to ${this.fallbackModel}...`);
+          
+          // Kill the failing process
+          try {
+            child.kill('SIGTERM');
+          } catch (e) {
+            // Ignore kill errors
+          }
+          
+          // Start fallback process
+          const fallbackChild = spawn('gemini', ['--model', this.fallbackModel, '--yolo', '--prompt', ''], {
+            cwd: workingDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            detached: false
+          });
+          
+          fallbackChild.stdin.write(prompt);
+          fallbackChild.stdin.end();
+          
+          if (!resolved) {
+            resolved = true;
+            resolve(fallbackChild);
+          }
+        }
+      });
+      
+      // Handle normal completion (no quota issues)
+      child.on('spawn', () => {
+        if (!resolved && !quotaExceededDetected) {
+          resolved = true;
+          resolve(child);
+        }
+      });
+      
+      // Handle spawn errors
+      child.on('error', (error) => {
+        if (!resolved) {
+          resolved = true;
+          reject(error);
+        }
+      });
+      
       child.stdin.write(prompt);
       child.stdin.end();
-      
-      return child;
-    } catch (error) {
-      // Return null if this model fails, so we can try fallback
-      return null;
-    }
+    });
   }
 
   async isAvailable(): Promise<boolean> {

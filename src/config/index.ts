@@ -26,6 +26,6 @@ export const defaultConfig: Config = {
   ai: {
     workingDir: process.env.AI_WORKING_DIR || '/tmp/ai-github-helper',
     preferredProvider: (process.env.AI_PROVIDER as 'claude' | 'gemini' | 'auto') || 'claude',
-    fallbackEnabled: process.env.AI_FALLBACK_ENABLED === 'true' || false
+    fallbackEnabled: process.env.AI_FALLBACK_ENABLED === 'true' || true
   }
 };
