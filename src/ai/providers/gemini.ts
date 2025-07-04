@@ -7,15 +7,41 @@ const execAsync = promisify(exec);
 
 export class GeminiProvider implements AIProvider {
   public readonly name = 'gemini';
+  private primaryModel = 'gemini-2.5-pro';
+  private fallbackModel = 'gemini-1.5-flash';
 
   async execute(prompt: string, workingDir: string): Promise<ChildProcess> {
-    const child = spawn('gemini', [prompt], {
-      cwd: workingDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false
-    });
+    // Try primary model first, with fallback to flash model if usage limits hit
+    let child = await this.tryExecuteWithModel(prompt, workingDir, this.primaryModel);
+    
+    // If primary model fails (possibly due to usage limits), try fallback
+    if (!child) {
+      child = await this.tryExecuteWithModel(prompt, workingDir, this.fallbackModel);
+    }
+    
+    if (!child) {
+      throw new Error('Failed to execute with both Gemini pro and flash models');
+    }
     
     return child;
+  }
+
+  private async tryExecuteWithModel(prompt: string, workingDir: string, model: string): Promise<ChildProcess | null> {
+    try {
+      const child = spawn('gemini', ['--model', model, '--yolo', '--prompt', ''], {
+        cwd: workingDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: false
+      });
+      
+      child.stdin.write(prompt);
+      child.stdin.end();
+      
+      return child;
+    } catch (error) {
+      // Return null if this model fails, so we can try fallback
+      return null;
+    }
   }
 
   async isAvailable(): Promise<boolean> {
@@ -28,6 +54,6 @@ export class GeminiProvider implements AIProvider {
   }
 
   getCommand(): string[] {
-    return ['gemini'];
+    return ['gemini', '--model', this.primaryModel, '--yolo', '--prompt', ''];
   }
 }

@@ -74,11 +74,11 @@ export class PullRequestHandler {
       child.unref();
       
       // Log output for debugging but don't wait for completion
-      child.stdout.on('data', (data) => {
+      child.stdout?.on('data', (data) => {
         this.logger.info(`AI stdout: ${data.toString()}`);
       });
       
-      child.stderr.on('data', (data) => {
+      child.stderr?.on('data', (data) => {
         this.logger.error(`AI stderr: ${data.toString()}`);
       });
       
