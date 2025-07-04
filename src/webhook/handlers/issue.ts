@@ -160,7 +160,7 @@ export class IssueHandler {
       this.logger.info(`Starting Claude issue analysis in background...`);
       
       // Start Claude process with proper process management
-      const child = spawn('claude', ['--print'], {
+      const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: false // Don't detach to prevent zombie processes
