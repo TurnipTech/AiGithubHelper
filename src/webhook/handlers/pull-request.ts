@@ -90,7 +90,7 @@ export class PullRequestHandler {
           unlinkSync(tempPromptFile);
           this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
         } catch (e) {
-          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile}`, e);
+          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile} - ${e}`);
         }
       });
       
@@ -101,7 +101,7 @@ export class PullRequestHandler {
           unlinkSync(tempPromptFile);
           this.logger.info(`Cleaned up temp file after error: ${tempPromptFile}`);
         } catch (e) {
-          this.logger.warn(`Failed to clean up temp file after error: ${tempPromptFile}`, e);
+          this.logger.warn(`Failed to clean up temp file after error: ${tempPromptFile} - ${e}`);
         }
       });
       

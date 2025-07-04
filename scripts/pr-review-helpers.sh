@@ -16,7 +16,7 @@ add_inline_comment() {
         return 1
     fi
     
-    ./scripts/add-pr-comment.sh "$repo_name" "$pr_number" "$file_path" "$line_number" "$comment_body"
+    "$(dirname "$0")/add-pr-comment.sh" "$repo_name" "$pr_number" "$file_path" "$line_number" "$comment_body"
 }
 
 # Function to add multiple inline comments from a temporary file
@@ -30,7 +30,7 @@ add_batch_comments() {
         return 1
     fi
     
-    ./scripts/add-pr-comments-batch.sh "$repo_name" "$pr_number" "$comments_file"
+    "$(dirname "$0")/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$comments_file"
 }
 
 # Function to create a temporary comments file and add multiple comments
@@ -53,7 +53,7 @@ create_and_submit_comments() {
     done
     
     # Submit the batch
-    ./scripts/add-pr-comments-batch.sh "$repo_name" "$pr_number" "$temp_file"
+    "$(dirname "$0")/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$temp_file"
     
     # Clean up
     rm "$temp_file"

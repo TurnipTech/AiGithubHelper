@@ -35,6 +35,12 @@ while IFS=':' read -r file_path line_number comment_body; do
         continue
     fi
     
+    # Validate line number is a positive integer
+    if [[ ! "$line_number" =~ ^[0-9]+$ ]]; then
+        echo "Warning: Skipping invalid line number '$line_number' for file '$file_path'"
+        continue
+    fi
+    
     # Add comma if not first comment
     if [ "$FIRST" = false ]; then
         COMMENTS_JSON+=","

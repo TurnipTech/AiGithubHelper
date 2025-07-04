@@ -17,6 +17,32 @@ FILE_PATH="$3"
 LINE_NUMBER="$4"
 COMMENT_BODY="$5"
 
+# Input validation
+if [[ ! "$REPO_NAME" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: Invalid repository name format. Expected: owner/repo"
+    exit 1
+fi
+
+if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Error: PR number must be a positive integer"
+    exit 1
+fi
+
+if [[ ! "$LINE_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Error: Line number must be a positive integer"
+    exit 1
+fi
+
+if [[ -z "$FILE_PATH" ]]; then
+    echo "Error: File path cannot be empty"
+    exit 1
+fi
+
+if [[ -z "$COMMENT_BODY" ]]; then
+    echo "Error: Comment body cannot be empty"
+    exit 1
+fi
+
 # Create the JSON payload
 JSON_PAYLOAD=$(cat <<EOF
 {
