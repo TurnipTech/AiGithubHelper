@@ -12,12 +12,12 @@ export class ClaudeProvider implements AIProvider {
     const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
       cwd: workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false
+      detached: false,
     });
-    
+
     child.stdin.write(prompt);
     child.stdin.end();
-    
+
     return child;
   }
 

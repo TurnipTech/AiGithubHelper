@@ -1,6 +1,6 @@
 import express from 'express';
-import { PullRequestHandler, createPullRequestHandler } from './handlers/pull-request';
-import { IssueHandler, createIssueHandler } from './handlers/issue';
+import { PullRequestHandler } from './handlers/pull-request';
+import { IssueHandler } from './handlers/issue';
 import { createPushHandler } from './handlers/push';
 import { verifyWebhookSignature } from './middleware/auth';
 import { environment, validateEnvironment } from '../config/environment';

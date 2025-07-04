@@ -18,14 +18,14 @@ export const defaultConfig: Config = {
   server: {
     port: parseInt(process.env.PORT || '3000'),
     host: process.env.HOST || 'localhost',
-    webhookPath: process.env.WEBHOOK_PATH || '/webhook'
+    webhookPath: process.env.WEBHOOK_PATH || '/webhook',
   },
   github: {
-    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || ''
+    webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || '',
   },
   ai: {
     workingDir: process.env.AI_WORKING_DIR || '/tmp/ai-github-helper',
     preferredProvider: (process.env.AI_PROVIDER as 'claude' | 'gemini' | 'auto') || 'claude',
-    fallbackEnabled: process.env.AI_FALLBACK_ENABLED === 'true' || true
-  }
+    fallbackEnabled: process.env.AI_FALLBACK_ENABLED === 'true' || true,
+  },
 };

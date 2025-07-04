@@ -20,7 +20,7 @@ export class GeminiProvider implements AIProvider {
     } catch (error) {
       console.log(`Primary model ${this.primaryModel} failed, trying fallback...`);
     }
-    
+
     // Fall back to Flash model
     try {
       const fallbackChild = await this.tryModel(this.fallbackModel, prompt, workingDir);
@@ -31,21 +31,21 @@ export class GeminiProvider implements AIProvider {
     } catch (error) {
       console.log(`Fallback model ${this.fallbackModel} also failed`);
     }
-    
+
     throw new Error(`Both ${this.primaryModel} and ${this.fallbackModel} failed`);
   }
-  
+
   private async tryModel(model: string, prompt: string, workingDir: string): Promise<ChildProcess> {
     return new Promise((resolve, reject) => {
       const child = spawn('gemini', ['--model', model, '--yolo', '--prompt', ''], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
-        detached: false
+        detached: false,
       });
-      
+
       let stderrBuffer = '';
       let resolved = false;
-      
+
       // Set up a timeout to determine if the process is working
       const timeout = setTimeout(() => {
         if (!resolved) {
@@ -53,16 +53,18 @@ export class GeminiProvider implements AIProvider {
           resolve(child);
         }
       }, 5000); // 5 second timeout
-      
+
       child.stderr.on('data', (data) => {
         stderrBuffer += data.toString();
-        
+
         // Check for quota exceeded or other critical errors
-        if (stderrBuffer.includes('Quota exceeded') || 
-            stderrBuffer.includes('status 429') || 
-            stderrBuffer.includes('rateLimitExceeded') ||
-            stderrBuffer.includes('NOT_FOUND') ||
-            stderrBuffer.includes('API Error')) {
+        if (
+          stderrBuffer.includes('Quota exceeded') ||
+          stderrBuffer.includes('status 429') ||
+          stderrBuffer.includes('rateLimitExceeded') ||
+          stderrBuffer.includes('NOT_FOUND') ||
+          stderrBuffer.includes('API Error')
+        ) {
           clearTimeout(timeout);
           if (!resolved) {
             resolved = true;
@@ -71,7 +73,7 @@ export class GeminiProvider implements AIProvider {
           }
         }
       });
-      
+
       child.on('error', (error) => {
         clearTimeout(timeout);
         if (!resolved) {
@@ -79,7 +81,7 @@ export class GeminiProvider implements AIProvider {
           reject(error);
         }
       });
-      
+
       child.on('exit', (code) => {
         clearTimeout(timeout);
         if (!resolved && code !== 0) {
@@ -87,7 +89,7 @@ export class GeminiProvider implements AIProvider {
           reject(new Error(`Model ${model} exited with code ${code}`));
         }
       });
-      
+
       child.stdin.write(prompt);
       child.stdin.end();
     });
