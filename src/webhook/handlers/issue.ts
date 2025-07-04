@@ -73,8 +73,8 @@ export class IssueHandler {
       return;
     }
 
-    // Check if the AI helper is mentioned (using word boundaries for exact matches)
-    const aiHelperRegex = /\b@ai-helper\b/i;
+    // Check if the AI helper is mentioned (ensure proper word boundaries)
+    const aiHelperRegex = /(?:^|[^\w])@ai-helper\b/i;
     const aiHelperMentioned = aiHelperRegex.test(textToCheck);
     
     if (!aiHelperMentioned) {
