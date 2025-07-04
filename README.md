@@ -1,5 +1,17 @@
 # AI GitHub Helper
 
+⚠️ **DISCLAIMER: This is a Proof of Concept (PoC)**
+
+This project uses potentially dangerous flags and modes for rapid development and testing:
+- **`--dangerously-skip-permissions`** (Claude CLI): Bypasses permission checks
+- **`--yolo`** (Gemini CLI): Experimental/unsafe operation mode
+
+**Use with extreme caution** and only on machines where security and data integrity are not critical concerns. These flags disable important safety mechanisms and could pose security risks. This is experimental software not intended for production use on systems with sensitive data or in environments where security is paramount.
+
+**Purpose**: This project provides functionality similar to [claude-code-action](https://github.com/anthropics/claude-code-action) but with the flexibility to swap AI providers and use your own subscriptions instead of API keys, helping you avoid unexpected bills while experimenting with AI-powered code review automation.
+
+---
+
 A Node.js-based automation system that provides intelligent, automated code reviews for GitHub pull requests using AI. The system leverages a hybrid architecture combining webhook-driven event handling with CLI-based GitHub operations for secure, scalable code review automation.
 
 ## Features
