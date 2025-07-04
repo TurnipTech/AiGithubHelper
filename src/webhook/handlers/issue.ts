@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { spawn } from 'child_process';
-import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 
@@ -86,25 +86,59 @@ export class IssueHandler {
     this.logger.info(`AI helper mentioned in issue #${issue.number}, starting code generation process`);
 
     try {
-      // Create a comprehensive prompt for issue analysis and code generation
-      const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment);
-      
-      // Use system temp directory for better security
-      const tempDir = resolve(tmpdir(), 'ai-github-helper');
+      // Create a unique temporary working directory for this issue
+      const tempWorkDir = resolve(tmpdir(), 'ai-github-helper', `issue-${issue.number}-${Date.now()}`);
       
       // Ensure temp directory exists
-      if (!existsSync(tempDir)) {
-        mkdirSync(tempDir, { recursive: true });
+      if (!existsSync(tempWorkDir)) {
+        mkdirSync(tempWorkDir, { recursive: true });
       }
       
-      const tempPromptFile = resolve(tempDir, `issue-prompt-${issue.number}-${Date.now()}.md`);
+      this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
       
-      // Validate that the file path is within the temp directory (prevent path traversal)
-      const normalizedTempFile = resolve(tempPromptFile);
-      const normalizedTempDir = resolve(tempDir);
-      if (!normalizedTempFile.startsWith(normalizedTempDir + '/') && normalizedTempFile !== normalizedTempDir) {
-        throw new Error('Invalid file path: potential path traversal attack');
-      }
+      // Clone the repository to the temporary directory
+      const repoUrl = `https://github.com/${repository.full_name}.git`;
+      const repoPath = resolve(tempWorkDir, repository.name);
+      
+      this.logger.info(`Cloning repository ${repoUrl} to ${repoPath}`);
+      
+      // Clone the repository
+      const gitClone = spawn('git', ['clone', repoUrl, repoPath], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      
+      await new Promise<void>((resolve, reject) => {
+        let cloneOutput = '';
+        let cloneError = '';
+        
+        gitClone.stdout.on('data', (data) => {
+          cloneOutput += data.toString();
+        });
+        
+        gitClone.stderr.on('data', (data) => {
+          cloneError += data.toString();
+        });
+        
+        gitClone.on('close', (code) => {
+          if (code === 0) {
+            this.logger.info(`Successfully cloned repository: ${cloneOutput}`);
+            resolve();
+          } else {
+            this.logger.error(`Failed to clone repository: ${cloneError}`);
+            reject(new Error(`Git clone failed with code ${code}: ${cloneError}`));
+          }
+        });
+        
+        gitClone.on('error', (error) => {
+          this.logger.error(`Git clone spawn error: ${error.message}`);
+          reject(error);
+        });
+      });
+      
+      // Create a comprehensive prompt for issue analysis and code generation
+      const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment, repoPath);
+      
+      const tempPromptFile = resolve(tempWorkDir, `issue-prompt-${issue.number}.md`);
       
       // Write file with proper error handling
       try {
@@ -115,7 +149,7 @@ export class IssueHandler {
         throw new Error(`Failed to create prompt file: ${writeError}`);
       }
 
-      const workingDir = this.config.ai.workingDir;
+      const workingDir = repoPath;
       
       this.logger.info(`Starting AI analysis for issue #${issue.number}`);
       this.logger.info(`Working directory: ${workingDir}`);
@@ -152,10 +186,11 @@ export class IssueHandler {
         }
         
         try {
-          unlinkSync(tempPromptFile);
-          this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
+          // Clean up the entire temporary working directory
+          rmSync(tempWorkDir, { recursive: true, force: true });
+          this.logger.info(`Cleaned up temp working directory: ${tempWorkDir}`);
         } catch (e) {
-          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile} - ${e}`);
+          this.logger.warn(`Failed to clean up temp working directory: ${tempWorkDir} - ${e}`);
         }
         
         // Remove event listeners to prevent memory leaks
@@ -217,7 +252,7 @@ export class IssueHandler {
     }
   }
 
-  private createIssueAnalysisPrompt(issue: GitHubIssue, repository: GitHubRepository, comment?: GitHubComment): string {
+  private createIssueAnalysisPrompt(issue: GitHubIssue, repository: GitHubRepository, comment?: GitHubComment, repoPath?: string): string {
     try {
       // Load prompt template from file
       const promptTemplatePath = resolve(__dirname, '../../ai-scripts/issue-handler/prompts.md');
