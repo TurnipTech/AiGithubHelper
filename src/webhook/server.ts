@@ -1,9 +1,11 @@
 import express from 'express';
-import { createPullRequestHandler } from './handlers/pull-request';
+import { PullRequestHandler, createPullRequestHandler } from './handlers/pull-request';
 import { createIssueHandler } from './handlers/issue';
 import { createPushHandler } from './handlers/push';
 import { verifyWebhookSignature } from './middleware/auth';
 import { environment, validateEnvironment } from '../config/environment';
+import { Logger } from '../utils/logger';
+import { defaultConfig } from '../config';
 
 const app = express();
 
@@ -11,7 +13,11 @@ app.use(express.json());
 
 validateEnvironment();
 
-app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), (req, res) => {
+// Initialize dependencies
+const logger = new Logger();
+const pullRequestHandler = new PullRequestHandler(logger, defaultConfig);
+
+app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), async (req, res) => {
   try {
     const eventType = req.headers['x-github-event'] as string;
     const payload = req.body;
@@ -21,8 +27,8 @@ app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), (req, re
 
     switch (eventType) {
       case 'pull_request':
-        createPullRequestHandler(payload);
-        break;
+        await pullRequestHandler.handlePullRequest(payload, req, res);
+        return; // Handler manages the response
       case 'issues':
         createIssueHandler(payload);
         break;
