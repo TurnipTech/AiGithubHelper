@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { spawn } from 'child_process';
-import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { AIProviderFactory } from '../../ai/factory';
@@ -144,28 +144,12 @@ export class IssueHandler {
       });
 
       // Create a comprehensive prompt for issue analysis and code generation
-      const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment);
-
-      // Write prompt file inside the cloned repository so AI can access it
-      const tempPromptFile = resolve(repoPath, `issue-prompt-${issue.number}.md`);
-
-      // Write file with proper error handling
-      try {
-        writeFileSync(tempPromptFile, promptContent);
-        this.logger.info(`Created temp prompt file: ${tempPromptFile}`);
-      } catch (writeError) {
-        this.logger.error(`Failed to write temp prompt file: ${writeError}`);
-        throw new Error(`Failed to create prompt file: ${writeError}`);
-      }
+      const processedPrompt = this.createIssueAnalysisPrompt(issue, repository, comment);
 
       const workingDir = repoPath;
 
       this.logger.info(`Starting AI analysis for issue #${issue.number}`);
       this.logger.info(`Working directory: ${workingDir}`);
-      this.logger.info(`Temp prompt file: ${tempPromptFile}`);
-
-      // Create a simple prompt that references the temp file (now inside the repo)
-      const simplePrompt = `Please read and execute the instructions in the file: issue-prompt-${issue.number}.md`;
 
       this.logger.info(`Starting AI issue analysis in background...`);
 
@@ -177,7 +161,7 @@ export class IssueHandler {
       this.logger.info(`Using AI provider: ${aiProvider.name}`);
 
       // Start AI process with proper process management
-      const child = await aiProvider.execute(simplePrompt, workingDir);
+      const child = await aiProvider.execute(processedPrompt, workingDir);
 
       // Set up proper cleanup handlers
       let isCleanedUp = false;
