@@ -1,12 +1,42 @@
 import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
-import { readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { spawn } from 'child_process';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
 
-const execAsync = promisify(exec);
+interface GitHubUser {
+  login: string;
+  id: number;
+  html_url: string;
+}
+
+interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  html_url: string;
+  user: GitHubUser;
+}
+
+interface GitHubComment {
+  body: string;
+  user: GitHubUser;
+}
+
+interface GitHubRepository {
+  full_name: string;
+  name: string;
+  html_url: string;
+}
+
+interface GitHubIssuePayload {
+  action: string;
+  issue: GitHubIssue;
+  repository: GitHubRepository;
+  comment?: GitHubComment;
+}
 
 export class IssueHandler {
   constructor(
@@ -14,7 +44,7 @@ export class IssueHandler {
     private config: Config
   ) {}
 
-  async handleIssue(payload: any, req: Request, res: Response): Promise<void> {
+  async handleIssue(payload: GitHubIssuePayload, req: Request, res: Response): Promise<void> {
     const action = payload.action;
     const issue = payload.issue;
     const repository = payload.repository;
@@ -42,8 +72,9 @@ export class IssueHandler {
       return;
     }
 
-    // Check if the AI helper is mentioned
-    const aiHelperMentioned = textToCheck.includes('@ai-helper') || textToCheck.includes('@ai helper');
+    // Check if the AI helper is mentioned (using proper regex for exact matches)
+    const aiHelperRegex = /(?:^|\s)@ai-helper(?:\s|$)/i;
+    const aiHelperMentioned = aiHelperRegex.test(textToCheck);
     
     if (!aiHelperMentioned) {
       this.logger.info(`AI helper not mentioned in issue #${issue.number}`);
@@ -57,8 +88,21 @@ export class IssueHandler {
       // Create a comprehensive prompt for issue analysis and code generation
       const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment);
       
-      // Create temporary prompt file
-      const tempPromptFile = join(process.cwd(), 'temp', `issue-prompt-${issue.number}-${Date.now()}.md`);
+      // Create temporary prompt file with proper path validation
+      const tempDir = resolve(process.cwd(), 'temp');
+      
+      // Ensure temp directory exists
+      if (!existsSync(tempDir)) {
+        mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const tempPromptFile = resolve(tempDir, `issue-prompt-${issue.number}-${Date.now()}.md`);
+      
+      // Validate that the file path is within the temp directory (prevent path traversal)
+      if (!tempPromptFile.startsWith(tempDir)) {
+        throw new Error('Invalid file path: potential path traversal attack');
+      }
+      
       writeFileSync(tempPromptFile, promptContent);
 
       const workingDir = this.config.ai.workingDir;
@@ -73,7 +117,7 @@ export class IssueHandler {
       this.logger.info(`Starting Claude issue analysis in background...`);
       
       // Start Claude process without awaiting - fire and forget
-      const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
+      const child = spawn('claude', ['--print'], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true
@@ -135,7 +179,7 @@ export class IssueHandler {
     }
   }
 
-  private createIssueAnalysisPrompt(issue: any, repository: any, comment?: any): string {
+  private createIssueAnalysisPrompt(issue: GitHubIssue, repository: GitHubRepository, comment?: GitHubComment): string {
     return `# AI Helper - Issue Analysis and Code Generation
 
 ## Task
@@ -210,7 +254,7 @@ Start by analyzing the issue and creating the appropriate branch. Then implement
   }
 }
 
-export function createIssueHandler(payload: any) {
+export function createIssueHandler(payload: GitHubIssuePayload) {
   console.log('Processing issue event...');
   
   const action = payload.action;
