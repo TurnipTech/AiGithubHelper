@@ -3,7 +3,7 @@ import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 
 const execAsync = promisify(exec);
@@ -44,8 +44,8 @@ export class PullRequestHandler {
         .replace(/\{\{baseBranch\}\}/g, baseBranch)
         .replace(/\{\{headBranch\}\}/g, headBranch);
 
-      // Create temporary prompt file outside src directory
-      const tempPromptFile = join(process.cwd(), `temp-prompt-${prNumber}-${Date.now()}.md`);
+      // Create temporary prompt file in temp folder
+      const tempPromptFile = join(process.cwd(), 'temp', `temp-prompt-${prNumber}-${Date.now()}.md`);
       writeFileSync(tempPromptFile, processedPrompt);
 
       // Execute Claude CLI directly instead of using bash script
@@ -87,15 +87,22 @@ export class PullRequestHandler {
         
         // Clean up temp file after Claude finishes
         try {
-          require('fs').unlinkSync(tempPromptFile);
+          unlinkSync(tempPromptFile);
           this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
         } catch (e) {
-          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile}`);
+          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile}`, e);
         }
       });
       
       child.on('error', (error) => {
         this.logger.error(`Claude spawn error: ${error.message}`);
+        // Clean up temp file on error
+        try {
+          unlinkSync(tempPromptFile);
+          this.logger.info(`Cleaned up temp file after error: ${tempPromptFile}`);
+        } catch (e) {
+          this.logger.warn(`Failed to clean up temp file after error: ${tempPromptFile}`, e);
+        }
       });
       
       // Unref the child process so it doesn't keep the parent alive
@@ -120,15 +127,7 @@ export class PullRequestHandler {
 }
 
 export function createPullRequestHandler(payload: any) {
-  console.log('Processing pull request event...');
-  
   const action = payload.action;
   const pullRequest = payload.pull_request;
   const repository = payload.repository;
-  
-  console.log(`Pull request ${action}:`);
-  console.log(`- Repository: ${repository.full_name}`);
-  console.log(`- PR #${pullRequest.number}: ${pullRequest.title}`);
-  console.log(`- Author: ${pullRequest.user.login}`);
-  console.log(`- State: ${pullRequest.state}`);
 }

@@ -41,6 +41,12 @@ bower_components/
 tmp/
 temp/
 
+# Temp prompt files
+temp-prompt-*.md
+
+# Upload files
+uploads/
+
 # IDE/Editor files
 .vscode/
 .idea/
