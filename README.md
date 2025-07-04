@@ -8,7 +8,9 @@ A Node.js-based automation system that provides intelligent, automated code revi
 - **Issue-Based AI Helper**: Mention `@ai-helper` in GitHub issues to automatically generate code and create pull requests
 - **Asynchronous Processing**: Fast webhook response with background AI processing
 - **GitHub CLI Integration**: Secure authentication using pre-configured `gh` CLI
+- **Multi-AI Provider Support**: Works with Claude CLI, Gemini CLI, or auto-detection
 - **Flexible AI Prompts**: Customizable review behavior via Markdown templates
+- **Provider Fallback**: Automatic fallback between AI providers for reliability
 - **Inline Comments**: Detailed feedback with batch comment posting
 - **Review Actions**: Automated approve/request-changes/comment decisions
 - **Detached Processing**: Non-blocking webhook handling for optimal performance
@@ -29,13 +31,24 @@ Before setting up the AI GitHub Helper, ensure you have:
    gh auth login
    ```
 
-3. **Claude Code CLI** installed and authenticated
+3. **AI Provider CLI** - Choose one or both:
+
+   ### Option 1: Claude Code CLI (Default)
    ```bash
    # Install Claude Code CLI
    # Follow instructions at https://docs.anthropic.com/en/docs/claude-code
 
    # Authenticate with Claude
-   claude-code auth
+   claude auth
+   ```
+
+   ### Option 2: Google Gemini CLI
+   ```bash
+   # Install Gemini CLI
+   npm install -g @google-cloud/gemini-cli
+
+   # Authenticate with Google
+   gemini auth  # Follow interactive authentication
    ```
 
 ## Setup
@@ -66,7 +79,8 @@ GITHUB_WEBHOOK_SECRET=your-webhook-secret-here
 
 # AI Configuration
 AI_WORKING_DIR=/tmp/ai-github-helper
-AI_PROVIDER=claude
+AI_PROVIDER=claude                # Options: claude, gemini, auto
+AI_FALLBACK_ENABLED=false        # Enable automatic fallback between providers
 ```
 
 ### 3. Generate Webhook Secret
@@ -245,13 +259,40 @@ Environment variables you can set:
 | `HOST` | Server host | `localhost` | No |
 | `GITHUB_WEBHOOK_SECRET` | GitHub webhook secret for HMAC validation | - | Yes |
 | `AI_WORKING_DIR` | Directory for AI operations | `/tmp/ai-github-helper` | No |
-| `AI_PROVIDER` | AI provider to use | `claude` | No |
+| `AI_PROVIDER` | AI provider to use (`claude`, `gemini`, `auto`) | `claude` | No |
+| `AI_FALLBACK_ENABLED` | Enable automatic fallback between providers | `false` | No |
+
+### AI Provider Configuration
+
+The system supports multiple AI providers with automatic fallback:
+
+#### Provider Options
+
+- **`claude`**: Uses Claude Code CLI (Anthropic) - paid service with high quality
+- **`gemini`**: Uses Gemini CLI (Google) - free tier available
+- **`auto`**: Automatically selects the first available provider (claude → gemini)
+
+#### Provider Features
+
+| Feature | Claude | Gemini |
+|---------|--------|--------|
+| **Cost** | Paid service | Free tier: 60 req/min, 1000/day |
+| **Installation** | Built-in auth flow | NPM package |
+| **Quality** | High-quality responses | Good quality responses |
+| **Rate Limits** | Usage-based billing | Free tier limits |
+
+#### Fallback Behavior
+
+When `AI_FALLBACK_ENABLED=true`:
+- If primary provider is unavailable, automatically tries the fallback
+- Provides redundancy and reduces service interruption
+- Logs which provider is actually used for each request
 
 ### Security Notes
 
 - **GITHUB_WEBHOOK_SECRET**: Must match the secret configured in your GitHub webhook settings
-- **CLI Authentication**: Both `gh` and `claude` CLI tools must be pre-authenticated
-- **No API Tokens**: The system deliberately avoids storing GitHub API tokens
+- **CLI Authentication**: AI provider CLIs must be pre-authenticated
+- **No API Tokens**: The system deliberately avoids storing API tokens
 
 ## Troubleshooting
 
@@ -268,9 +309,12 @@ Environment variables you can set:
    - Check that the GitHub CLI has access to your repository
 
 3. **AI execution fails**
-   - Ensure Claude Code CLI is installed and authenticated
+   - Ensure your chosen AI provider CLI is installed and authenticated
+   - For Claude: `claude auth` and verify connection
+   - For Gemini: `gemini auth` and verify connection
    - Check the AI working directory exists and is writable
    - Verify the webhook secret matches between GitHub and your `.env`
+   - Try `AI_PROVIDER=auto` to test provider availability
 
 ### Logs
 
@@ -286,8 +330,11 @@ npm run dev
 You can test the AI executor manually:
 
 ```bash
-# Test Claude Code CLI directly
-claude-code "Review this code and provide feedback"
+# Test Claude CLI directly
+claude "Review this code and provide feedback"
+
+# Test Gemini CLI directly  
+gemini "Review this code and provide feedback"
 
 # Test GitHub CLI
 gh pr list

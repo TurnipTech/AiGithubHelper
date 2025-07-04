@@ -5,6 +5,7 @@ import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { AIProviderFactory } from '../../ai/factory';
 
 const execAsync = promisify(exec);
 
@@ -60,32 +61,31 @@ export class PullRequestHandler {
       // Create a simple prompt that references the temp file
       const simplePrompt = `Please read and execute the instructions in the file: ${tempPromptFile}`;
       
-      this.logger.info(`Starting Claude review in background...`);
+      this.logger.info(`Starting AI review in background...`);
       
-      // Start Claude process without awaiting - fire and forget
-      const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
-        cwd: workingDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true // Run detached so it continues after webhook returns
-      });
+      // Get AI provider based on configuration
+      const aiProvider = await AIProviderFactory.create(this.config.ai.preferredProvider, this.config.ai.fallbackEnabled);
+      this.logger.info(`Using AI provider: ${aiProvider.name}`);
       
-      // Write the simple prompt to stdin
-      child.stdin.write(simplePrompt);
-      child.stdin.end();
+      // Start AI process without awaiting - fire and forget
+      const child = await aiProvider.execute(simplePrompt, workingDir);
+      
+      // Make process detached so it continues after webhook returns
+      child.unref();
       
       // Log output for debugging but don't wait for completion
       child.stdout.on('data', (data) => {
-        this.logger.info(`Claude stdout: ${data.toString()}`);
+        this.logger.info(`AI stdout: ${data.toString()}`);
       });
       
       child.stderr.on('data', (data) => {
-        this.logger.error(`Claude stderr: ${data.toString()}`);
+        this.logger.error(`AI stderr: ${data.toString()}`);
       });
       
       child.on('close', (code) => {
-        this.logger.info(`Claude process exited with code ${code}`);
+        this.logger.info(`AI process exited with code ${code}`);
         
-        // Clean up temp file after Claude finishes
+        // Clean up temp file after AI finishes
         try {
           unlinkSync(tempPromptFile);
           this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
@@ -95,7 +95,7 @@ export class PullRequestHandler {
       });
       
       child.on('error', (error) => {
-        this.logger.error(`Claude spawn error: ${error.message}`);
+        this.logger.error(`AI spawn error: ${error.message}`);
         // Clean up temp file on error
         try {
           unlinkSync(tempPromptFile);
@@ -104,11 +104,8 @@ export class PullRequestHandler {
           this.logger.warn(`Failed to clean up temp file after error: ${tempPromptFile} - ${e}`);
         }
       });
-      
-      // Unref the child process so it doesn't keep the parent alive
-      child.unref();
 
-      this.logger.info(`Claude review started for PR #${prNumber}`);
+      this.logger.info(`AI review started for PR #${prNumber}`);
       
       res.status(200).json({
         message: 'Code review started',
