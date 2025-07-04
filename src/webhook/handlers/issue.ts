@@ -106,7 +106,7 @@ export class IssueHandler {
       this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
 
       // Clone the repository using GitHub CLI (already authenticated)
-      // const repoPath = resolve(tempWorkDir, repository.name);
+      const repoPath = resolve(tempWorkDir, repository.name);
 
       this.logger.info(`Cloning repository ${repository.full_name} to ${repoPath}`);
 
