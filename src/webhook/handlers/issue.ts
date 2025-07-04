@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { spawn } from 'child_process';
-import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { tmpdir } from 'os';
 
 interface GitHubUser {
   login: string;
@@ -72,8 +73,8 @@ export class IssueHandler {
       return;
     }
 
-    // Check if the AI helper is mentioned (using proper regex for exact matches)
-    const aiHelperRegex = /(?:^|\s)@ai-helper(?:\s|$)/i;
+    // Check if the AI helper is mentioned (using word boundaries for exact matches)
+    const aiHelperRegex = /\b@ai-helper\b/i;
     const aiHelperMentioned = aiHelperRegex.test(textToCheck);
     
     if (!aiHelperMentioned) {
@@ -88,8 +89,8 @@ export class IssueHandler {
       // Create a comprehensive prompt for issue analysis and code generation
       const promptContent = this.createIssueAnalysisPrompt(issue, repository, comment);
       
-      // Create temporary prompt file with proper path validation
-      const tempDir = resolve(process.cwd(), 'temp');
+      // Use system temp directory for better security
+      const tempDir = resolve(tmpdir(), 'ai-github-helper');
       
       // Ensure temp directory exists
       if (!existsSync(tempDir)) {
@@ -103,7 +104,14 @@ export class IssueHandler {
         throw new Error('Invalid file path: potential path traversal attack');
       }
       
-      writeFileSync(tempPromptFile, promptContent);
+      // Write file with proper error handling
+      try {
+        writeFileSync(tempPromptFile, promptContent);
+        this.logger.info(`Created temp prompt file: ${tempPromptFile}`);
+      } catch (writeError) {
+        this.logger.error(`Failed to write temp prompt file: ${writeError}`);
+        throw new Error(`Failed to create prompt file: ${writeError}`);
+      }
 
       const workingDir = this.config.ai.workingDir;
       
@@ -116,16 +124,40 @@ export class IssueHandler {
       
       this.logger.info(`Starting Claude issue analysis in background...`);
       
-      // Start Claude process without awaiting - fire and forget
+      // Start Claude process with proper process management
       const child = spawn('claude', ['--print'], {
         cwd: workingDir,
         stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true
+        detached: false // Don't detach to prevent zombie processes
       });
       
       // Write the simple prompt to stdin
       child.stdin.write(simplePrompt);
       child.stdin.end();
+      
+      // Set up proper cleanup handlers
+      const cleanup = () => {
+        try {
+          if (!child.killed) {
+            child.kill('SIGTERM');
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to kill Claude process: ${e}`);
+        }
+        
+        try {
+          unlinkSync(tempPromptFile);
+          this.logger.info(`Cleaned up temp file: ${tempPromptFile}`);
+        } catch (e) {
+          this.logger.warn(`Failed to clean up temp file: ${tempPromptFile} - ${e}`);
+        }
+      };
+      
+      // Set up timeout to prevent hanging processes
+      const timeout = setTimeout(() => {
+        this.logger.warn(`Claude process timeout, killing process`);
+        cleanup();
+      }, 10 * 60 * 1000); // 10 minutes timeout
       
       // Log output for debugging but don't wait for completion
       child.stdout.on('data', (data) => {
@@ -137,6 +169,7 @@ export class IssueHandler {
       });
       
       child.on('close', (code) => {
+        clearTimeout(timeout);
         this.logger.info(`Claude process exited with code ${code}`);
         
         // Clean up temp file after Claude finishes
@@ -149,18 +182,15 @@ export class IssueHandler {
       });
       
       child.on('error', (error) => {
+        clearTimeout(timeout);
         this.logger.error(`Claude spawn error: ${error.message}`);
-        // Clean up temp file on error
-        try {
-          unlinkSync(tempPromptFile);
-          this.logger.info(`Cleaned up temp file after error: ${tempPromptFile}`);
-        } catch (e) {
-          this.logger.warn(`Failed to clean up temp file after error: ${tempPromptFile} - ${e}`);
-        }
+        cleanup();
       });
       
-      // Unref the child process so it doesn't keep the parent alive
-      child.unref();
+      // Handle process exit cleanup
+      process.on('exit', cleanup);
+      process.on('SIGINT', cleanup);
+      process.on('SIGTERM', cleanup);
 
       this.logger.info(`Claude issue analysis started for issue #${issue.number}`);
       
@@ -180,77 +210,47 @@ export class IssueHandler {
   }
 
   private createIssueAnalysisPrompt(issue: GitHubIssue, repository: GitHubRepository, comment?: GitHubComment): string {
-    return `# AI Helper - Issue Analysis and Code Generation
+    try {
+      // Load prompt template from file
+      const promptTemplatePath = resolve(__dirname, '../../ai-scripts/issue-handler/prompts.md');
+      let promptTemplate = readFileSync(promptTemplatePath, 'utf8');
+      
+      // Replace template variables
+      promptTemplate = promptTemplate
+        .replace(/{{repoName}}/g, repository.full_name)
+        .replace(/{{issueNumber}}/g, issue.number.toString())
+        .replace(/{{issueTitle}}/g, issue.title)
+        .replace(/{{issueAuthor}}/g, issue.user.login)
+        .replace(/{{issueState}}/g, issue.state)
+        .replace(/{{issueUrl}}/g, issue.html_url)
+        .replace(/{{issueDescription}}/g, issue.body || 'No description provided');
+      
+      // Handle comment section
+      if (comment) {
+        promptTemplate = promptTemplate
+          .replace(/{{#comment}}/g, '')
+          .replace(/{{\/comment}}/g, '')
+          .replace(/{{commentAuthor}}/g, comment.user.login)
+          .replace(/{{commentBody}}/g, comment.body);
+      } else {
+        // Remove comment section if no comment
+        promptTemplate = promptTemplate.replace(/{{#comment}}[\s\S]*?{{\/comment}}/g, '');
+      }
+      
+      return promptTemplate;
+    } catch (error) {
+      this.logger.error(`Failed to load prompt template: ${error}`);
+      // Fallback to simple prompt if template loading fails
+      return `# AI Helper - Issue Analysis and Code Generation
 
-## Task
-You are an AI assistant helping with GitHub issue resolution. You need to:
-1. Analyze the issue description thoroughly
-2. Create a new feature branch for this issue
-3. Implement the requested feature/fix
-4. Create a pull request with your changes
-5. Add comprehensive commit messages
+Analyze and implement solution for issue #${issue.number}: ${issue.title}
 
-## Issue Details
-- **Repository**: ${repository.full_name}
-- **Issue Number**: #${issue.number}
-- **Issue Title**: ${issue.title}
-- **Issue Author**: ${issue.user.login}
-- **Issue State**: ${issue.state}
-- **Issue URL**: ${issue.html_url}
+Repository: ${repository.full_name}
+Issue: ${issue.body || 'No description provided'}
+${comment ? `\nComment: ${comment.body}` : ''}
 
-## Issue Description
-${issue.body || 'No description provided'}
-
-${comment ? `## Additional Context (from comment)
-**Comment by**: ${comment.user.login}
-**Comment**: ${comment.body}` : ''}
-
-## Instructions
-1. **Branch Management**: Create a new branch named \`feature/issue-${issue.number}\` or \`fix/issue-${issue.number}\` depending on the issue type
-2. **Code Analysis**: First understand the current codebase structure and identify what needs to be changed
-3. **Implementation**: Implement the requested feature or fix following the existing code patterns and conventions
-4. **Testing**: Ensure your changes work correctly and don't break existing functionality
-5. **Documentation**: Update relevant documentation if needed
-6. **Pull Request**: Create a pull request with:
-   - Clear title referencing the issue
-   - Detailed description of changes made
-   - Link to the original issue using "Closes #${issue.number}"
-
-## Quality Requirements
-- Follow existing code style and patterns
-- Add appropriate error handling
-- Include logging where appropriate
-- Ensure backward compatibility
-- Write clear, self-documenting code
-
-## Commit Message Format
-Use conventional commits format:
-- \`feat: description\` for new features
-- \`fix: description\` for bug fixes
-- \`docs: description\` for documentation changes
-- \`refactor: description\` for code refactoring
-
-Each commit message should end with:
-🤖 Generated with [Claude Code](https://claude.ai/code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>
-
-## GitHub CLI Commands
-Use these commands to create the PR:
-\`\`\`bash
-gh pr create --title "Implement: ${issue.title}" --body "Closes #${issue.number}
-
-## Summary
-[Describe what was implemented]
-
-## Changes Made
-[List key changes]
-
-🤖 Generated with [Claude Code](https://claude.ai/code)"
-\`\`\`
-
-Start by analyzing the issue and creating the appropriate branch. Then implement the solution step by step.
-`;
+Create a feature branch, implement the solution, and create a pull request.`;
+    }
   }
 }
 
