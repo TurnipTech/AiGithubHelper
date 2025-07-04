@@ -1,6 +1,6 @@
 import express from 'express';
 import { PullRequestHandler, createPullRequestHandler } from './handlers/pull-request';
-import { createIssueHandler } from './handlers/issue';
+import { IssueHandler, createIssueHandler } from './handlers/issue';
 import { createPushHandler } from './handlers/push';
 import { verifyWebhookSignature } from './middleware/auth';
 import { environment, validateEnvironment } from '../config/environment';
@@ -16,6 +16,7 @@ validateEnvironment();
 // Initialize dependencies
 const logger = new Logger();
 const pullRequestHandler = new PullRequestHandler(logger, defaultConfig);
+const issueHandler = new IssueHandler(logger, defaultConfig);
 
 app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), async (req, res) => {
   try {
@@ -30,8 +31,11 @@ app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), async (r
         await pullRequestHandler.handlePullRequest(payload, req, res);
         return; // Handler manages the response
       case 'issues':
-        createIssueHandler(payload);
-        break;
+        await issueHandler.handleIssue(payload, req, res);
+        return; // Handler manages the response
+      case 'issue_comment':
+        await issueHandler.handleIssue(payload, req, res);
+        return; // Handler manages the response
       case 'push':
         createPushHandler(payload);
         break;

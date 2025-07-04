@@ -5,6 +5,7 @@ A Node.js-based automation system that provides intelligent, automated code revi
 ## Features
 
 - **Automated AI Code Reviews**: Intelligent analysis of pull requests with contextual feedback
+- **Issue-Based AI Helper**: Mention `@ai-helper` in GitHub issues to automatically generate code and create pull requests
 - **Asynchronous Processing**: Fast webhook response with background AI processing
 - **GitHub CLI Integration**: Secure authentication using pre-configured `gh` CLI
 - **Flexible AI Prompts**: Customizable review behavior via Markdown templates
@@ -118,7 +119,7 @@ This will give you a public URL like `https://abc123.ngrok.io`.
    - **Payload URL**: `https://your-domain.com/webhook` (or your ngrok URL + `/webhook`)
    - **Content type**: `application/json`
    - **Secret**: The webhook secret you generated earlier
-   - **Events**: Select "Pull requests" (and optionally "Pull request reviews")
+   - **Events**: Select "Pull requests", "Issues", and "Issue comments"
    - **Active**: ✅ Checked
 
 4. Click **Add webhook**
@@ -131,7 +132,9 @@ This will give you a public URL like `https://abc123.ngrok.io`.
 
 ## How It Works
 
-The system operates as a stateless, asynchronous webhook server with the following workflow:
+The system operates as a stateless, asynchronous webhook server with two main workflows:
+
+### Pull Request Review Workflow
 
 1. **Webhook Reception**: GitHub sends a `pull_request` event when a PR is opened/updated
 2. **Security Verification**: HMAC signature validation ensures the request is authentic
@@ -144,6 +147,46 @@ The system operates as a stateless, asynchronous webhook server with the followi
    - Post batch inline comments via helper scripts
    - Submit final review decision (approve/request-changes/comment)
 7. **Cleanup**: Temporary prompt files are automatically removed
+
+### Issue-Based AI Helper Workflow
+
+1. **Issue Creation/Comment**: User creates an issue or comments on an existing issue mentioning `@ai-helper`
+2. **AI Helper Detection**: The system detects the mention and triggers the AI helper workflow
+3. **Issue Analysis**: AI analyzes the issue description and requirements
+4. **Branch Creation**: AI creates a new feature/fix branch for the issue
+5. **Code Implementation**: AI implements the requested feature or fix following project patterns
+6. **Pull Request Creation**: AI creates a pull request with comprehensive description
+7. **Automatic Linking**: PR is automatically linked to the original issue using "Closes #X"
+
+### Using the Issue-Based AI Helper
+
+To use the issue-based AI helper:
+
+1. **Create an Issue**: Create a GitHub issue describing what you want implemented
+2. **Mention the AI Helper**: Include `@ai-helper` anywhere in the issue title, description, or comments
+3. **Wait for Processing**: The AI will automatically start analyzing and implementing your request
+4. **Review the PR**: The AI will create a pull request with the implementation for your review
+
+**Example Issue:**
+```
+Title: Add user authentication feature
+Description: 
+We need to implement user authentication with login/logout functionality.
+The feature should include:
+- Login form with email/password
+- JWT token handling
+- Protected routes
+- User session management
+
+@ai-helper implement this feature
+```
+
+The AI will automatically:
+- Create a new branch (`feature/issue-123` or similar)
+- Implement the authentication system
+- Follow existing code patterns and conventions
+- Create a pull request with detailed description
+- Link the PR to close the original issue
 
 ### Architecture Benefits
 
@@ -166,7 +209,9 @@ The system operates as a stateless, asynchronous webhook server with the followi
 │   │   └── logger.ts          # Structured logging utility
 │   └── webhook/
 │       ├── handlers/           # Event-specific webhook handlers
-│       │   └── pull-request.ts # Pull request event processing
+│       │   ├── pull-request.ts # Pull request event processing
+│       │   ├── issue.ts        # Issue and issue comment event processing
+│       │   └── push.ts         # Push event processing
 │       ├── middleware/         # Express middleware
 │       │   └── auth.ts        # HMAC webhook signature verification
 │       └── server.ts          # Main Express.js webhook server
@@ -182,7 +227,9 @@ The system operates as a stateless, asynchronous webhook server with the followi
 
 ### Key Components
 
-- **Webhook Server**: Express.js server handling GitHub webhook events
+- **Webhook Server**: Express.js server handling GitHub webhook events (pull requests, issues, comments)
+- **Pull Request Handler**: Automated code review system with AI-driven feedback
+- **Issue Handler**: AI helper that responds to `@ai-helper` mentions in issues
 - **AI Scripts**: Markdown-based prompt templates with dynamic context injection
 - **Shell Scripts**: Bash utilities providing GitHub CLI operation interfaces
 - **Middleware**: Security and request validation components
