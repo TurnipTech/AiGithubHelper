@@ -19,11 +19,10 @@ Before any other action, examine the code changes and create inline comments on 
 
 ```bash
 # REQUIRED: Use the review API for inline comments
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Detailed code review with inline comments" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Detailed code review with inline comments",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/user-service.ts",
       "line": 23,
@@ -44,7 +43,10 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 45,
       "body": "🐛 **Bug**: Null check missing. Add `if (!user) return null;` before accessing user properties."
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 ```
 
 ### 2. Assign Yourself as Reviewer
@@ -103,11 +105,10 @@ gh pr review {{prNumber}} --comment --body "Review complete - see inline comment
 
 **Security Issues:**
 ```bash
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Security review findings" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Security review findings",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/auth.ts",
       "line": 15,
@@ -118,16 +119,18 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 28,
       "body": "🔐 **Authentication**: Missing JWT token verification. Add `verifyToken(req.headers.authorization)` before processing."
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 ```
 
 **Performance Issues:**
 ```bash
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Performance optimization suggestions" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Performance optimization suggestions",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/database.ts",
       "line": 42,
@@ -138,16 +141,18 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 67,
       "body": "🐌 **Memory**: This creates a large array in memory. Consider using streaming or pagination for large datasets."
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 ```
 
 **Bug Fixes:**
 ```bash
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Bug fixes needed" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Bug fixes needed",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/service.ts",
       "line": 89,
@@ -158,16 +163,18 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 34,
       "body": "❌ **Logic Error**: This regex doesn't handle international domains. Use a proper email validation library."
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 ```
 
 **Code Quality:**
 ```bash
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Code quality improvements" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Code quality improvements",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/helpers.ts",
       "line": 12,
@@ -178,17 +185,19 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 8,
       "body": "🧹 **Cleanup**: Unused import `lodash`. Remove to reduce bundle size."
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 ```
 
 **Complete Example Workflow:**
 ```bash
 # 1. FIRST: Create inline comments (MANDATORY)
-gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
-  --method POST \
-  --field body="Code review complete - see inline comments below" \
-  --field event="COMMENT" \
-  --field comments='[
+echo '{
+  "body": "Code review complete - see inline comments below",
+  "event": "COMMENT",
+  "comments": [
     {
       "path": "src/user.ts",
       "line": 23,
@@ -199,7 +208,10 @@ gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
       "line": 45,
       "body": "⚡ **Performance**: Add database index on `user_id` column for faster queries"
     }
-  ]'
+  ]
+}' | gh api repos/{{repoName}}/pulls/{{prNumber}}/reviews \
+  --method POST \
+  --input -
 
 # 2. THEN: Assign yourself as reviewer
 gh pr edit {{prNumber}} --add-reviewer @me
