@@ -36,13 +36,12 @@ fi
 # Start building the JSON payload
 echo "Creating batch review with inline comments..."
 
-# Create a temporary file to store comment data for jq
-TEMP_COMMENTS_FILE=$(mktemp)
-trap "rm -f '$TEMP_COMMENTS_FILE'" EXIT
+# Create temporary files for optimized processing with error handling and race condition prevention
+TEMP_COMMENTS_FILE=$(mktemp -t "pr-comments-XXXXXX") || { echo "Error: Failed to create temporary file for comments"; exit 1; }
+TEMP_VALIDATED_FILE=$(mktemp -t "pr-validated-XXXXXX") || { echo "Error: Failed to create temporary file for validation"; exit 1; }
+trap "rm -f '$TEMP_COMMENTS_FILE' '$TEMP_VALIDATED_FILE'" EXIT
 
-# Read and validate comments, building a JSON array
-echo "[]" > "$TEMP_COMMENTS_FILE"
-
+# First pass: validate and collect all comments
 while IFS=':' read -r file_path line_number comment_body; do
     # Skip empty lines
     if [ -z "$file_path" ] || [ -z "$line_number" ] || [ -z "$comment_body" ]; then
@@ -55,13 +54,25 @@ while IFS=':' read -r file_path line_number comment_body; do
         continue
     fi
     
-    # Add comment to JSON array using jq for safe construction
-    jq --arg path "$file_path" \
-       --argjson line "$line_number" \
-       --arg body "$comment_body" \
-       '. += [{path: $path, line: $line, body: $body}]' \
-       "$TEMP_COMMENTS_FILE" > "$TEMP_COMMENTS_FILE.tmp" && mv "$TEMP_COMMENTS_FILE.tmp" "$TEMP_COMMENTS_FILE"
+    # Store validated comment data (using tab as delimiter to avoid issues with colons in content)
+    printf '%s\t%s\t%s\n' "$file_path" "$line_number" "$comment_body" >> "$TEMP_VALIDATED_FILE"
 done < "$COMMENTS_FILE"
+
+# Second pass: build JSON array efficiently using jq with all comments at once
+if [ -s "$TEMP_VALIDATED_FILE" ]; then
+    # Process all comments in a single jq call for better performance
+    jq -n '[
+        inputs | 
+        split("\t") | 
+        {
+            path: .[0], 
+            line: (.[1] | tonumber), 
+            body: .[2]
+        }
+    ]' "$TEMP_VALIDATED_FILE" > "$TEMP_COMMENTS_FILE"
+else
+    echo "[]" > "$TEMP_COMMENTS_FILE"
+fi
 
 # Create the full JSON payload using jq
 JSON_PAYLOAD=$(jq -n \

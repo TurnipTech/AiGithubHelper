@@ -3,6 +3,24 @@
 # Helper functions for PR reviews
 # Source this file to use the functions: source ./pr-review-helpers.sh
 
+# Get the absolute path of the script directory and validate it
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -d "$SCRIPT_DIR" ]; then
+    echo "Error: Unable to determine script directory"
+    exit 1
+fi
+
+# Validate that required scripts exist
+if [ ! -f "$SCRIPT_DIR/add-pr-comment.sh" ]; then
+    echo "Error: Required script not found: $SCRIPT_DIR/add-pr-comment.sh"
+    exit 1
+fi
+
+if [ ! -f "$SCRIPT_DIR/add-pr-comments-batch.sh" ]; then
+    echo "Error: Required script not found: $SCRIPT_DIR/add-pr-comments-batch.sh"
+    exit 1
+fi
+
 # Function to add a single inline comment
 add_inline_comment() {
     local repo_name="$1"
@@ -16,7 +34,7 @@ add_inline_comment() {
         return 1
     fi
     
-    "$(dirname "$0")/add-pr-comment.sh" "$repo_name" "$pr_number" "$file_path" "$line_number" "$comment_body"
+    "$SCRIPT_DIR/add-pr-comment.sh" "$repo_name" "$pr_number" "$file_path" "$line_number" "$comment_body"
 }
 
 # Function to add multiple inline comments from a temporary file
@@ -30,7 +48,7 @@ add_batch_comments() {
         return 1
     fi
     
-    "$(dirname "$0")/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$comments_file"
+    "$SCRIPT_DIR/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$comments_file"
 }
 
 # Function to create a temporary comments file and add multiple comments
@@ -45,18 +63,18 @@ create_and_submit_comments() {
         return 1
     fi
     
-    local temp_file=$(mktemp)
+    local temp_file=$(mktemp -t "pr-helper-XXXXXX") || { echo "Error: Failed to create temporary file"; return 1; }
+    
+    # Set up cleanup trap for this function
+    trap "rm -f '$temp_file'" RETURN
     
     # Add each comment to the temp file
     for comment in "$@"; do
-        echo "$comment" >> "$temp_file"
+        echo "$comment" >> "$temp_file" || { echo "Error: Failed to write to temporary file"; return 1; }
     done
     
     # Submit the batch
-    "$(dirname "$0")/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$temp_file"
-    
-    # Clean up
-    rm "$temp_file"
+    "$SCRIPT_DIR/add-pr-comments-batch.sh" "$repo_name" "$pr_number" "$temp_file"
 }
 
 # Function to assign reviewer
