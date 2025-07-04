@@ -1,13 +1,17 @@
 # AI GitHub Helper
 
-A webhook-based automation system that uses AI (Claude Code) to perform automated code reviews on GitHub pull requests.
+A Node.js-based automation system that provides intelligent, automated code reviews for GitHub pull requests using AI. The system leverages a hybrid architecture combining webhook-driven event handling with CLI-based GitHub operations for secure, scalable code review automation.
 
 ## Features
 
-- **Automated Code Reviews**: AI analyzes pull requests and provides feedback
-- **GitHub CLI Integration**: Uses `gh` commands to interact with GitHub
-- **Simple Setup**: Minimal configuration required
-- **Webhook Driven**: Responds to GitHub PR events in real-time
+- **Automated AI Code Reviews**: Intelligent analysis of pull requests with contextual feedback
+- **Asynchronous Processing**: Fast webhook response with background AI processing
+- **GitHub CLI Integration**: Secure authentication using pre-configured `gh` CLI
+- **Flexible AI Prompts**: Customizable review behavior via Markdown templates
+- **Inline Comments**: Detailed feedback with batch comment posting
+- **Review Actions**: Automated approve/request-changes/comment decisions
+- **Detached Processing**: Non-blocking webhook handling for optimal performance
+- **Shell Script Integration**: Reusable bash scripts for GitHub operations
 
 ## Prerequisites
 
@@ -127,49 +131,80 @@ This will give you a public URL like `https://abc123.ngrok.io`.
 
 ## How It Works
 
-1. **GitHub sends webhook** when PR is opened/updated
-2. **Server receives webhook** and validates the signature
-3. **AI Executor runs** `claude-code` with the code review prompt
-4. **Claude Code analyzes** the PR using GitHub CLI commands:
-   - `gh pr checkout <number>` - Checks out the PR
-   - `gh pr diff <number>` - Reviews the changes
-   - `gh pr review <number> --comment` - Adds review comments
-5. **AI provides feedback** directly on the GitHub PR
+The system operates as a stateless, asynchronous webhook server with the following workflow:
+
+1. **Webhook Reception**: GitHub sends a `pull_request` event when a PR is opened/updated
+2. **Security Verification**: HMAC signature validation ensures the request is authentic
+3. **Prompt Generation**: Dynamic prompt creation by injecting PR context into templates
+4. **Detached AI Process**: Background AI execution spawned as a separate process
+5. **Fast Response**: Immediate `200 OK` response to GitHub (prevents timeouts)
+6. **AI-Driven Review**: The AI follows scripted instructions to:
+   - Check out the PR branch using `gh pr checkout`
+   - Analyze code changes with `gh pr diff`
+   - Post batch inline comments via helper scripts
+   - Submit final review decision (approve/request-changes/comment)
+7. **Cleanup**: Temporary prompt files are automatically removed
+
+### Architecture Benefits
+
+- **Non-blocking**: Webhook endpoint remains responsive
+- **Secure**: No API tokens stored; relies on pre-authenticated CLI tools
+- **Scalable**: Stateless design supports multiple concurrent reviews
+- **Extensible**: Bash scripts provide reusable GitHub operation interfaces
 
 ## File Structure
 
 ```
-src/
-├── ai-scripts/
-│   └── code-reviewer/
-│       ├── index.ts        # Code review orchestrator
-│       └── prompts.md      # AI prompt template
-├── ai-cli/
-│   ├── executor.ts         # AI CLI execution engine
-│   └── types.ts           # Type definitions
-├── webhook/
-│   ├── server.ts          # Main webhook server
-│   └── handlers/
-│       └── pull-request.ts # PR event handler
-├── github/
-│   └── api.ts             # GitHub API utilities
-├── utils/
-│   └── logger.ts          # Logging utilities
-└── config/
-    └── index.ts           # Configuration management
+/
+├── src/
+│   ├── ai-scripts/             # AI prompt templates and instructions
+│   │   └── code-reviewer/
+│   │       └── prompts.md      # Dynamic prompt template for code reviews
+│   ├── config/                 # Configuration management
+│   │   └── index.ts           # Environment variable handling
+│   ├── utils/                  # Utility classes and functions
+│   │   └── logger.ts          # Structured logging utility
+│   └── webhook/
+│       ├── handlers/           # Event-specific webhook handlers
+│       │   └── pull-request.ts # Pull request event processing
+│       ├── middleware/         # Express middleware
+│       │   └── auth.ts        # HMAC webhook signature verification
+│       └── server.ts          # Main Express.js webhook server
+├── scripts/                    # Reusable bash scripts for GitHub operations
+│   ├── add-pr-comments-batch.sh   # Batch inline comment posting
+│   ├── pr-review-helpers.sh       # Review submission utilities
+│   └── run-claude-review.sh       # AI execution wrapper
+├── temp/                       # Temporary prompt files (auto-generated)
+├── .env.example               # Environment variable template
+├── package.json              # Node.js dependencies and scripts
+└── tsconfig.json            # TypeScript compiler configuration
 ```
+
+### Key Components
+
+- **Webhook Server**: Express.js server handling GitHub webhook events
+- **AI Scripts**: Markdown-based prompt templates with dynamic context injection
+- **Shell Scripts**: Bash utilities providing GitHub CLI operation interfaces
+- **Middleware**: Security and request validation components
+- **Configuration**: Environment-based configuration management
 
 ## Configuration Options
 
 Environment variables you can set:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `3000` |
-| `HOST` | Server host | `localhost` |
-| `GITHUB_WEBHOOK_SECRET` | GitHub webhook secret | Required |
-| `AI_WORKING_DIR` | Directory for AI operations | `/tmp/ai-github-helper` |
-| `AI_PROVIDER` | AI provider to use | `claude` |
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PORT` | Server port | `3000` | No |
+| `HOST` | Server host | `localhost` | No |
+| `GITHUB_WEBHOOK_SECRET` | GitHub webhook secret for HMAC validation | - | Yes |
+| `AI_WORKING_DIR` | Directory for AI operations | `/tmp/ai-github-helper` | No |
+| `AI_PROVIDER` | AI provider to use | `claude` | No |
+
+### Security Notes
+
+- **GITHUB_WEBHOOK_SECRET**: Must match the secret configured in your GitHub webhook settings
+- **CLI Authentication**: Both `gh` and `claude` CLI tools must be pre-authenticated
+- **No API Tokens**: The system deliberately avoids storing GitHub API tokens
 
 ## Troubleshooting
 
@@ -222,6 +257,15 @@ For production deployment:
 3. **Use PM2** or similar for process management
 4. **Configure proper logging** and monitoring
 5. **Set up environment variables** securely
+6. **Monitor AI process execution** and cleanup
+7. **Configure rate limiting** for webhook endpoints
+8. **Set up health checks** for the webhook server
+
+### Performance Considerations
+
+- **Concurrent Reviews**: The detached process model supports multiple simultaneous PR reviews
+- **Resource Management**: Monitor disk usage for temporary prompt files
+- **AI Rate Limits**: Be aware of your AI provider's rate limits and quotas
 
 ## Contributing
 
