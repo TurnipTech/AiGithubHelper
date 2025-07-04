@@ -45,27 +45,26 @@ export class PullRequestHandler {
         .replace(/\{\{baseBranch\}\}/g, baseBranch)
         .replace(/\{\{headBranch\}\}/g, headBranch);
 
-      // Create temporary prompt file in temp folder
-      const tempPromptFile = join(process.cwd(), 'temp', `temp-prompt-${prNumber}-${Date.now()}.md`);
-      writeFileSync(tempPromptFile, processedPrompt);
-
-      // Execute Claude CLI directly instead of using bash script
+      // Execute AI provider directly instead of using bash script
       const workingDir = this.config.ai.workingDir;
+
+      // Create temporary prompt file in AI working directory
+      const tempPromptFile = join(workingDir, `temp-prompt-${prNumber}-${Date.now()}.md`);
+      writeFileSync(tempPromptFile, processedPrompt);
       
-      this.logger.info(`Executing Claude directly`);
+      // Get AI provider based on configuration
+      const aiProvider = await AIProviderFactory.create(this.config.ai.preferredProvider, this.config.ai.fallbackEnabled);
+      
+      this.logger.info(`Executing ${aiProvider.name} directly`);
       this.logger.info(`Working directory: ${workingDir}`);
       this.logger.info(`Temp prompt file: ${tempPromptFile}`);
       
-      this.logger.info(`About to execute Claude with spawn...`);
+      this.logger.info(`About to execute ${aiProvider.name} with spawn...`);
       
       // Create a simple prompt that references the temp file
       const simplePrompt = `Please read and execute the instructions in the file: ${tempPromptFile}`;
       
       this.logger.info(`Starting AI review in background...`);
-      
-      // Get AI provider based on configuration
-      const aiProvider = await AIProviderFactory.create(this.config.ai.preferredProvider, this.config.ai.fallbackEnabled);
-      this.logger.info(`Using AI provider: ${aiProvider.name}`);
       
       // Start AI process without awaiting - fire and forget
       const child = await aiProvider.execute(simplePrompt, workingDir);
