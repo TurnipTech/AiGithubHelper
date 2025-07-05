@@ -17,6 +17,7 @@ A Node.js-based automation system that provides intelligent, automated code revi
 ## Features
 
 - **Automated AI Code Reviews**: Intelligent analysis of pull requests with contextual feedback
+- **Interactive Review Comments**: Mention `@ai-helper` in PR review comments to get targeted responses
 - **Issue-Based AI Helper**: Mention `@ai-helper` in GitHub issues to automatically generate code and create pull requests
 - **Asynchronous Processing**: Fast webhook response with background AI processing
 - **GitHub CLI Integration**: Secure authentication using pre-configured `gh` CLI
@@ -145,7 +146,7 @@ This will give you a public URL like `https://abc123.ngrok.io`.
    - **Payload URL**: `https://your-domain.com/webhook` (or your ngrok URL + `/webhook`)
    - **Content type**: `application/json`
    - **Secret**: The webhook secret you generated earlier
-   - **Events**: Select "Pull requests", "Issues", and "Issue comments"
+   - **Events**: Select "Pull requests", "Pull request reviews", "Pull request review comments", "Issues", and "Issue comments"
    - **Active**: ✅ Checked
 
 4. Click **Add webhook**
@@ -214,6 +215,39 @@ The AI will automatically:
 - Create a pull request with detailed description
 - Link the PR to close the original issue
 
+### Interactive Review Comments Workflow
+
+The system also supports interactive code review assistance through review comments:
+
+1. **Review Comment Creation**: A reviewer adds a comment on a PR review and mentions `@ai-helper`
+2. **AI Helper Detection**: The system detects the mention in review comments
+3. **Context Analysis**: AI analyzes the specific comment, file, and diff context
+4. **Targeted Response**: AI provides specific implementation or fixes based on the comment
+5. **Direct Implementation**: AI can directly implement requested changes and push to the PR branch
+
+### Using Interactive Review Comments
+
+To get AI assistance during code review:
+
+1. **Start a PR Review**: Begin reviewing a pull request normally
+2. **Add Specific Comments**: Comment on specific lines or sections of code
+3. **Mention the AI Helper**: Include `@ai-helper` in your review comment
+4. **Request Specific Actions**: Be specific about what you want implemented
+
+**Example Review Comments:**
+```
+Line-specific comment: "This function needs error handling @ai-helper add try-catch"
+General comment: "@ai-helper refactor this component to use hooks instead of class components"
+Security comment: "@ai-helper this looks vulnerable to XSS, please sanitize the input"
+```
+
+The AI will:
+- Understand the specific context of your comment
+- Access the relevant code file and surrounding diff
+- Implement the requested changes directly
+- Push commits to the PR branch
+- Reply to confirm the implementation
+
 ### Architecture Benefits
 
 - **Non-blocking**: Webhook endpoint remains responsive
@@ -236,6 +270,7 @@ The AI will automatically:
 │   └── webhook/
 │       ├── handlers/           # Event-specific webhook handlers
 │       │   ├── pull-request.ts # Pull request event processing
+│       │   ├── review-comment.ts # PR review and review comment processing
 │       │   ├── issue.ts        # Issue and issue comment event processing
 │       │   └── push.ts         # Push event processing
 │       ├── middleware/         # Express middleware
@@ -253,8 +288,9 @@ The AI will automatically:
 
 ### Key Components
 
-- **Webhook Server**: Express.js server handling GitHub webhook events (pull requests, issues, comments)
+- **Webhook Server**: Express.js server handling GitHub webhook events (pull requests, reviews, issues, comments)
 - **Pull Request Handler**: Automated code review system with AI-driven feedback
+- **Review Comment Handler**: Interactive AI assistance for PR review comments and general reviews
 - **Issue Handler**: AI helper that responds to `@ai-helper` mentions in issues
 - **AI Scripts**: Markdown-based prompt templates with dynamic context injection
 - **Shell Scripts**: Bash utilities providing GitHub CLI operation interfaces

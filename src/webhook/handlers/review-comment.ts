@@ -203,7 +203,7 @@ export class ReviewCommentHandler {
 
     try {
       // Clone the repository using GitHub CLI
-      const repoPath = resolve(tempWorkDir, repository.name);
+      const repoPath = resolve(tempWorkDir, this.sanitizeFilename(repository.name));
       await this.cloneRepository(repository, repoPath);
 
       // Checkout the PR branch
@@ -217,10 +217,7 @@ export class ReviewCommentHandler {
       );
 
       // Get AI provider based on configuration
-      const aiProvider = await AIProviderFactory.create(
-        this.config.ai.preferredProvider,
-        this.config.ai.fallbackEnabled,
-      );
+      const aiProvider = await this.getAIProvider();
       this.logger.info(`Using AI provider: ${aiProvider.name}`);
 
       // Start AI process with proper process management
@@ -258,7 +255,7 @@ export class ReviewCommentHandler {
 
     try {
       // Clone the repository using GitHub CLI
-      const repoPath = resolve(tempWorkDir, repository.name);
+      const repoPath = resolve(tempWorkDir, this.sanitizeFilename(repository.name));
       await this.cloneRepository(repository, repoPath);
 
       // Checkout the PR branch
@@ -270,10 +267,7 @@ export class ReviewCommentHandler {
       this.logger.info(`Starting AI analysis for review ${review.id} on PR #${pullRequest.number}`);
 
       // Get AI provider based on configuration
-      const aiProvider = await AIProviderFactory.create(
-        this.config.ai.preferredProvider,
-        this.config.ai.fallbackEnabled,
-      );
+      const aiProvider = await this.getAIProvider();
       this.logger.info(`Using AI provider: ${aiProvider.name}`);
 
       // Start AI process with proper process management
@@ -295,10 +289,11 @@ export class ReviewCommentHandler {
   }
 
   private async cloneRepository(repository: GitHubRepository, repoPath: string): Promise<void> {
-    this.logger.info(`Cloning repository ${repository.full_name} to ${repoPath}`);
+    const sanitizedRepoName = this.sanitizeRepositoryName(repository.full_name);
+    this.logger.info(`Cloning repository ${sanitizedRepoName} to ${repoPath}`);
 
     return new Promise<void>((resolve, reject) => {
-      const ghClone = spawn('gh', ['repo', 'clone', repository.full_name, repoPath], {
+      const ghClone = spawn('gh', ['repo', 'clone', sanitizedRepoName, repoPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -331,10 +326,11 @@ export class ReviewCommentHandler {
   }
 
   private async checkoutPRBranch(repoPath: string, pullRequest: GitHubPullRequest): Promise<void> {
-    this.logger.info(`Checking out PR branch ${pullRequest.head.ref} in ${repoPath}`);
+    const sanitizedBranchName = this.sanitizeBranchName(pullRequest.head.ref);
+    this.logger.info(`Checking out PR branch ${sanitizedBranchName} in ${repoPath}`);
 
     return new Promise<void>((resolve, reject) => {
-      const gitCheckout = spawn('git', ['checkout', pullRequest.head.ref], {
+      const gitCheckout = spawn('git', ['checkout', sanitizedBranchName], {
         cwd: repoPath,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -443,21 +439,21 @@ export class ReviewCommentHandler {
       const promptTemplatePath = resolve(__dirname, '../../ai-scripts/review-response/prompts.md');
       let promptTemplate = readFileSync(promptTemplatePath, 'utf8');
 
-      // Replace template variables
+      // Replace template variables with escaped values
       promptTemplate = promptTemplate
-        .replace(/{{repoName}}/g, repository.full_name)
+        .replace(/{{repoName}}/g, this.escapeTemplateString(repository.full_name))
         .replace(/{{prNumber}}/g, pullRequest.number.toString())
-        .replace(/{{prTitle}}/g, pullRequest.title)
-        .replace(/{{prAuthor}}/g, pullRequest.user.login)
-        .replace(/{{prUrl}}/g, pullRequest.html_url)
-        .replace(/{{headBranch}}/g, pullRequest.head.ref)
-        .replace(/{{baseBranch}}/g, pullRequest.base.ref)
+        .replace(/{{prTitle}}/g, this.escapeTemplateString(pullRequest.title))
+        .replace(/{{prAuthor}}/g, this.escapeTemplateString(pullRequest.user.login))
+        .replace(/{{prUrl}}/g, this.escapeTemplateString(pullRequest.html_url))
+        .replace(/{{headBranch}}/g, this.escapeTemplateString(pullRequest.head.ref))
+        .replace(/{{baseBranch}}/g, this.escapeTemplateString(pullRequest.base.ref))
         .replace(/{{commentId}}/g, comment.id.toString())
-        .replace(/{{commentAuthor}}/g, comment.user.login)
-        .replace(/{{commentBody}}/g, comment.body)
-        .replace(/{{commentPath}}/g, comment.path)
+        .replace(/{{commentAuthor}}/g, this.escapeTemplateString(comment.user.login))
+        .replace(/{{commentBody}}/g, this.escapeTemplateString(comment.body))
+        .replace(/{{commentPath}}/g, this.escapeTemplateString(comment.path))
         .replace(/{{commentLine}}/g, comment.line?.toString() || 'N/A')
-        .replace(/{{diffHunk}}/g, comment.diff_hunk);
+        .replace(/{{diffHunk}}/g, this.escapeTemplateString(comment.diff_hunk));
 
       // Handle comment section - show comment block, hide review block
       promptTemplate = promptTemplate
@@ -468,8 +464,7 @@ export class ReviewCommentHandler {
       return promptTemplate;
     } catch (error) {
       this.logger.error(`Failed to load review comment prompt template: ${error}`);
-      // Fallback to simple prompt if template loading fails
-      return this.createFallbackReviewCommentPrompt(pullRequest, repository, comment);
+      throw new Error(`Unable to load prompt template: ${error}`);
     }
   }
 
@@ -483,19 +478,22 @@ export class ReviewCommentHandler {
       const promptTemplatePath = resolve(__dirname, '../../ai-scripts/review-response/prompts.md');
       let promptTemplate = readFileSync(promptTemplatePath, 'utf8');
 
-      // Replace template variables for general review
+      // Replace template variables for general review with escaped values
       promptTemplate = promptTemplate
-        .replace(/{{repoName}}/g, repository.full_name)
+        .replace(/{{repoName}}/g, this.escapeTemplateString(repository.full_name))
         .replace(/{{prNumber}}/g, pullRequest.number.toString())
-        .replace(/{{prTitle}}/g, pullRequest.title)
-        .replace(/{{prAuthor}}/g, pullRequest.user.login)
-        .replace(/{{prUrl}}/g, pullRequest.html_url)
-        .replace(/{{headBranch}}/g, pullRequest.head.ref)
-        .replace(/{{baseBranch}}/g, pullRequest.base.ref)
+        .replace(/{{prTitle}}/g, this.escapeTemplateString(pullRequest.title))
+        .replace(/{{prAuthor}}/g, this.escapeTemplateString(pullRequest.user.login))
+        .replace(/{{prUrl}}/g, this.escapeTemplateString(pullRequest.html_url))
+        .replace(/{{headBranch}}/g, this.escapeTemplateString(pullRequest.head.ref))
+        .replace(/{{baseBranch}}/g, this.escapeTemplateString(pullRequest.base.ref))
         .replace(/{{reviewId}}/g, review.id.toString())
-        .replace(/{{reviewAuthor}}/g, review.user.login)
-        .replace(/{{reviewBody}}/g, review.body || 'No review body provided')
-        .replace(/{{reviewState}}/g, review.state);
+        .replace(/{{reviewAuthor}}/g, this.escapeTemplateString(review.user.login))
+        .replace(
+          /{{reviewBody}}/g,
+          this.escapeTemplateString(review.body || 'No review body provided'),
+        )
+        .replace(/{{reviewState}}/g, this.escapeTemplateString(review.state));
 
       // Handle review section - show review block, hide comment block
       promptTemplate = promptTemplate
@@ -506,84 +504,81 @@ export class ReviewCommentHandler {
       return promptTemplate;
     } catch (error) {
       this.logger.error(`Failed to load general review prompt template: ${error}`);
-      // Fallback to simple prompt if template loading fails
-      return this.createFallbackGeneralReviewPrompt(pullRequest, repository, review);
+      throw new Error(`Unable to load prompt template: ${error}`);
     }
   }
 
-  private createFallbackReviewCommentPrompt(
-    pullRequest: GitHubPullRequest,
-    repository: GitHubRepository,
-    comment: GitHubReviewComment,
-  ): string {
-    return `# AI Helper - Review Comment Response
+  private sanitizeRepositoryName(fullName: string): string {
+    if (!fullName || typeof fullName !== 'string') {
+      throw new Error('Repository name must be a non-empty string');
+    }
 
-You are responding to a code review comment that mentions @ai-helper. Your job is to implement the requested changes and push them to the PR branch.
+    // Basic GitHub repository name validation
+    const repoNameRegex = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+    if (!repoNameRegex.test(fullName)) {
+      throw new Error('Invalid repository name format');
+    }
 
-## Context
-- Repository: ${repository.full_name}
-- PR Number: #${pullRequest.number}
-- PR Title: ${pullRequest.title}
-- PR Author: ${pullRequest.user.login}
-- Comment Author: ${comment.user.login}
-- File: ${comment.path}
-- Line: ${comment.line || 'N/A'}
-
-## Review Comment
-${comment.body}
-
-## Diff Context
-\`\`\`
-${comment.diff_hunk}
-\`\`\`
-
-## Task
-Analyze the review comment and implement the requested changes:
-1. Understand what the reviewer is asking for
-2. Locate the relevant code in the repository
-3. Implement the requested changes
-4. Commit the changes with a descriptive message
-5. Reply to the comment confirming implementation
-
-## Working Environment
-You are working in a cloned repository with the PR branch checked out.
-Make changes directly to the files and commit them.
-
-Start by analyzing the comment and implementing the solution.`;
+    return fullName;
   }
 
-  private createFallbackGeneralReviewPrompt(
-    pullRequest: GitHubPullRequest,
-    repository: GitHubRepository,
-    review: GitHubReview,
-  ): string {
-    return `# AI Helper - General Review Response
+  private sanitizeBranchName(branchName: string): string {
+    if (!branchName || typeof branchName !== 'string') {
+      throw new Error('Branch name must be a non-empty string');
+    }
 
-You are responding to a general pull request review that mentions @ai-helper. Your job is to implement the requested changes and push them to the PR branch.
+    // Basic Git branch name validation
+    const branchNameRegex = /^[a-zA-Z0-9/_.-]+$/;
+    if (!branchNameRegex.test(branchName)) {
+      throw new Error('Invalid branch name format');
+    }
 
-## Context
-- Repository: ${repository.full_name}
-- PR Number: #${pullRequest.number}
-- PR Title: ${pullRequest.title}
-- PR Author: ${pullRequest.user.login}
-- Review Author: ${review.user.login}
-- Review State: ${review.state}
+    // Prevent potentially dangerous branch names
+    if (branchName.includes('..') || branchName.startsWith('/') || branchName.endsWith('/')) {
+      throw new Error('Branch name contains invalid characters');
+    }
 
-## Review Comments
-${review.body || 'No review body provided'}
+    return branchName;
+  }
 
-## Task
-Analyze the review and implement the requested changes:
-1. Understand what the reviewer is asking for
-2. Locate the relevant code in the repository
-3. Implement the requested changes
-4. Commit the changes with a descriptive message
-5. Reply to the review confirming implementation
+  private sanitizeFilename(filename: string): string {
+    if (!filename || typeof filename !== 'string') {
+      throw new Error('Filename must be a non-empty string');
+    }
 
-## Working Environment
-You are working in a cloned repository with the PR branch checked out.
-Make changes directly to the files and commit them.
+    // Remove dangerous characters and paths
+    const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-Start by analyzing the review and implementing the solution.`;
+    // Prevent directory traversal
+    if (sanitized.includes('..') || sanitized.startsWith('/') || sanitized.startsWith('\\')) {
+      throw new Error('Filename contains invalid characters');
+    }
+
+    return sanitized;
+  }
+
+  private escapeTemplateString(value: string): string {
+    if (!value || typeof value !== 'string') {
+      return '';
+    }
+
+    // Escape special characters to prevent template injection
+    return value
+      .replace(/\\/g, '\\\\')
+      .replace(/\$/g, '\\$')
+      .replace(/`/g, '\\`')
+      .replace(/\{/g, '\\{')
+      .replace(/\}/g, '\\}')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private async getAIProvider() {
+    return await AIProviderFactory.create(
+      this.config.ai.preferredProvider,
+      this.config.ai.fallbackEnabled,
+    );
   }
 }
