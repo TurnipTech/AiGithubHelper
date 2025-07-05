@@ -11,6 +11,7 @@ export interface Config {
     workingDir: string;
     preferredProvider: 'claude' | 'gemini' | 'auto';
     fallbackEnabled: boolean;
+    autoFixReviews: boolean;
   };
 }
 
@@ -27,5 +28,6 @@ export const defaultConfig: Config = {
     workingDir: process.env.AI_WORKING_DIR || '/tmp/ai-github-helper',
     preferredProvider: (process.env.AI_PROVIDER as 'claude' | 'gemini' | 'auto') || 'claude',
     fallbackEnabled: process.env.AI_FALLBACK_ENABLED === 'true' || true,
+    autoFixReviews: process.env.AUTO_FIX_REVIEWS === 'true' || false,
   },
 };
