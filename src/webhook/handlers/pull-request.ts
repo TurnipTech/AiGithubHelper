@@ -29,6 +29,21 @@ export class PullRequestHandler {
     const baseBranch = payload.pull_request.base.ref;
     const headBranch = payload.pull_request.head.ref;
 
+    // Validate repository and branch names
+    const repoNameRegex = /^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/;
+    if (!repoNameRegex.test(repoName)) {
+      this.logger.error(`Invalid repository name format: ${repoName}`);
+      res.status(400).json({ error: 'Invalid repository name format' });
+      return;
+    }
+
+    const branchNameRegex = /^[a-zA-Z0-9-._\/]+$/;
+    if (!branchNameRegex.test(baseBranch) || !branchNameRegex.test(headBranch)) {
+      this.logger.error(`Invalid branch name format: ${baseBranch} or ${headBranch}`);
+      res.status(400).json({ error: 'Invalid branch name format' });
+      return;
+    }
+
     this.logger.info(`Processing PR ${payload.action} event for #${prNumber} in ${repoName}`);
 
     try {
@@ -36,23 +51,41 @@ export class PullRequestHandler {
       const promptTemplatePath = join(__dirname, '../../ai-scripts/code-reviewer/prompts.md');
       const promptTemplate = readFileSync(promptTemplatePath, 'utf8');
 
+      const escape = (str: string) => str.replace(/[&<>"]/g, (tag) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+      }[tag] || tag));
+
       // Replace template variables
       const processedPrompt = promptTemplate
-        .replace(/\{\{repoName\}\}/g, repoName)
-        .replace(/\{\{prNumber\}\}/g, prNumber.toString())
-        .replace(/\{\{prTitle\}\}/g, prTitle)
-        .replace(/\{\{prAuthor\}\}/g, prAuthor)
-        .replace(/\{\{baseBranch\}\}/g, baseBranch)
-        .replace(/\{\{headBranch\}\}/g, headBranch);
+        .replace(/\{\{repoName\}\}/g, escape(repoName))
+        .replace(/\{\{prNumber\}\}/g, escape(prNumber.toString()))
+        .replace(/\{\{prTitle\}\}/g, escape(prTitle))
+        .replace(/\{\{prAuthor\}\}/g, escape(prAuthor))
+        .replace(/\{\{baseBranch\}\}/g, escape(baseBranch))
+        .replace(/\{\{headBranch\}\}/g, escape(headBranch));
 
       // Execute AI provider directly instead of using bash script
       const workingDir = this.config.ai.workingDir;
 
       // Get AI provider based on configuration
-      const aiProvider = await AIProviderFactory.create(
-        this.config.ai.preferredProvider,
-        this.config.ai.fallbackEnabled,
-      );
+      let aiProvider;
+      try {
+        aiProvider = await AIProviderFactory.create(
+          this.config.ai.preferredProvider,
+          this.config.ai.fallbackEnabled,
+        );
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(`Failed to create AI provider: ${errorMessage}`);
+        res.status(500).json({
+          error: 'Failed to create AI provider',
+          message: errorMessage,
+        });
+        return;
+      }
 
       this.logger.info(`Executing ${aiProvider.name} directly`);
       this.logger.info(`Working directory: ${workingDir}`);

@@ -9,93 +9,76 @@ import { AIProviderFactory } from '../../ai/factory';
 
 interface GitHubUser {
   login: string;
-  id: number;
-  html_url: string;
 }
 
-interface GitHubIssue {
+interface GitHubPullRequest {
   number: number;
-  title: string;
-  body: string | null;
-  state: string;
   html_url: string;
-  user: GitHubUser;
-}
-
-interface GitHubComment {
-  body: string;
-  user: GitHubUser;
+  head: {
+    ref: string;
+    sha: string;
+  };
 }
 
 interface GitHubRepository {
   full_name: string;
   name: string;
-  html_url: string;
+  clone_url: string;
 }
 
-interface GitHubIssuePayload {
+interface GitHubReviewComment {
+  body: string;
+  user: GitHubUser;
+  path: string;
+  diff_hunk: string;
+}
+
+interface GitHubReview {
+  body: string;
+  user: GitHubUser;
+}
+
+interface GitHubReviewPayload {
   action: string;
-  issue: GitHubIssue;
+  pull_request: GitHubPullRequest;
   repository: GitHubRepository;
-  comment?: GitHubComment;
+  comment?: GitHubReviewComment;
+  review?: GitHubReview;
 }
 
-export class IssueHandler {
+export class ReviewCommentHandler {
   constructor(
     private logger: Logger,
     private config: Config,
   ) {}
 
-  async handleIssue(payload: GitHubIssuePayload, req: Request, res: Response): Promise<void> {
-    const action = payload.action;
-    const issue = payload.issue;
-    const repository = payload.repository;
-    const comment = payload.comment; // For issue_comment events
-
-    // Validate repository and branch names
-    const repoNameRegex = /^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/;
-    if (!repoNameRegex.test(repository.full_name)) {
-      this.logger.error(`Invalid repository name format: ${repository.full_name}`);
-      res.status(400).json({ error: 'Invalid repository name format' });
-      return;
-    }
+  async handleReviewComment(payload: GitHubReviewPayload, req: Request, res: Response): Promise<void> {
+    const { action, pull_request, repository, comment, review } = payload;
 
     this.logger.info(
-      `Processing issue ${action} event for #${issue.number} in ${repository.full_name}`,
+      `Processing review comment event for PR #${pull_request.number} in ${repository.full_name}`,
     );
 
-    // Handle both issue events and issue comment events
     let textToCheck = '';
-    let isValidEvent = false;
-
-    if (action === 'opened' || action === 'edited') {
-      // New or edited issue
-      textToCheck = `${issue.title} ${issue.body || ''}`;
-      isValidEvent = true;
-    } else if (action === 'created' && comment) {
-      // New comment on issue
-      textToCheck = comment.body || '';
-      isValidEvent = true;
-    }
-
-    if (!isValidEvent) {
-      this.logger.info(`Ignoring issue action: ${action}`);
+    if (action === 'created' && comment) {
+      textToCheck = comment.body;
+    } else if (action === 'submitted' && review) {
+      textToCheck = review.body;
+    } else {
+      this.logger.info(`Ignoring review comment action: ${action}`);
       res.status(200).json({ message: 'Event ignored' });
       return;
     }
 
-    // Check if the AI helper is mentioned (ensure proper word boundaries)
     const aiHelperRegex = /(?:^|[^\w])@ai-helper\b/i;
-    const aiHelperMentioned = aiHelperRegex.test(textToCheck);
-
-    if (!aiHelperMentioned) {
-      this.logger.info(`AI helper not mentioned in issue #${issue.number}`);
+    if (!aiHelperRegex.test(textToCheck)) {
+      this.logger.info(`AI helper not mentioned in PR #${pull_request.number}`);
       res.status(200).json({ message: 'AI helper not mentioned' });
       return;
     }
 
     this.logger.info(
-      `AI helper mentioned in issue #${issue.number}, starting code generation process`,
+      `AI helper mentioned in PR #${pull_request.number}, starting code generation process`,
     );
 
     try {
@@ -103,7 +86,7 @@ export class IssueHandler {
       const tempWorkDir = resolve(
         tmpdir(),
         'ai-github-helper',
-        `issue-${issue.number}-${Date.now()}`,
+        `pr-${pull_request.number}-${Date.now()}`,
       );
 
       // Ensure temp directory exists
@@ -152,15 +135,49 @@ export class IssueHandler {
         });
       });
 
-      // Create a comprehensive prompt for issue analysis and code generation
-      const processedPrompt = this.createIssueAnalysisPrompt(issue, repository, comment);
+      // Checkout the PR branch
+      const gitCheckout = spawn('git', ['checkout', pull_request.head.ref], {
+        cwd: repoPath,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      await new Promise<void>((resolve, reject) => {
+        let checkoutOutput = '';
+        let checkoutError = '';
+
+        gitCheckout.stdout.on('data', (data) => {
+          checkoutOutput += data.toString();
+        });
+
+        gitCheckout.stderr.on('data', (data) => {
+          checkoutError += data.toString();
+        });
+
+        gitCheckout.on('close', (code) => {
+          if (code === 0) {
+            this.logger.info(`Successfully checked out branch: ${checkoutOutput}`);
+            resolve();
+          } else {
+            this.logger.error(`Failed to checkout branch: ${checkoutError}`);
+            reject(new Error(`Git checkout failed with code ${code}: ${checkoutError}`));
+          }
+        });
+
+        gitCheckout.on('error', (error) => {
+          this.logger.error(`Git checkout spawn error: ${error.message}`);
+          reject(error);
+        });
+      });
+
+      // Create a comprehensive prompt for review response
+      const processedPrompt = this.createReviewResponsePrompt(pull_request, repository, comment, review);
 
       const workingDir = repoPath;
 
-      this.logger.info(`Starting AI analysis for issue #${issue.number}`);
+      this.logger.info(`Starting AI analysis for PR #${pull_request.number}`);
       this.logger.info(`Working directory: ${workingDir}`);
 
-      this.logger.info(`Starting AI issue analysis in background...`);
+      this.logger.info(`Starting AI review response in background...`);
 
       // Get AI provider based on configuration
       let aiProvider;
@@ -172,23 +189,6 @@ export class IssueHandler {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(`Failed to create AI provider: ${errorMessage}`);
-        // Post a comment to the issue about the failure
-        const commentUrl = `${this.config.github.apiUrl}/repos/${repository.full_name}/issues/${issue.number}/comments`;
-        const commentBody = {
-          body: `Failed to start AI processing due to an internal error: ${errorMessage}`,
-        };
-        try {
-          await fetch(commentUrl, {
-            method: 'POST',
-            headers: {
-              Authorization: `token ${this.config.github.token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(commentBody),
-          });
-        } catch (commentError) {
-          this.logger.error(`Failed to post error comment to issue: ${commentError}`);
-        }
         res.status(500).json({
           error: 'Failed to create AI provider',
           message: errorMessage,
@@ -212,7 +212,7 @@ export class IssueHandler {
             child.kill('SIGTERM');
           }
         } catch (e) {
-          this.logger.warn(`Failed to kill Claude process: ${e}`);
+          this.logger.warn(`Failed to kill AI process: ${e}`);
         }
 
         try {
@@ -270,15 +270,15 @@ export class IssueHandler {
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
 
-      this.logger.info(`AI issue analysis started for issue #${issue.number}`);
+      this.logger.info(`AI review response started for PR #${pull_request.number}`);
 
       res.status(200).json({
-        message: 'Issue analysis and code generation started',
-        issueNumber: issue.number,
+        message: 'Review comment analysis and code generation started',
+        prNumber: pull_request.number,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Error handling issue event: ${errorMessage}`);
+      this.logger.error(`Error handling review comment event: ${errorMessage}`);
       res.status(500).json({
         error: 'Internal server error',
         message: errorMessage,
@@ -286,66 +286,58 @@ export class IssueHandler {
     }
   }
 
-  private createIssueAnalysisPrompt(
-    issue: GitHubIssue,
+  private createReviewResponsePrompt(
+    pullRequest: GitHubPullRequest,
     repository: GitHubRepository,
-    comment?: GitHubComment,
-    repoPath?: string,
+    comment?: GitHubReviewComment,
+    review?: GitHubReview,
   ): string {
     try {
       // Load prompt template from file
-      const promptTemplatePath = resolve(__dirname, '../../ai-scripts/issue-handler/prompts.md');
+      const promptTemplatePath = resolve(__dirname, '../../ai-scripts/review-response/prompts.md');
       let promptTemplate = readFileSync(promptTemplatePath, 'utf8');
 
-      const escape = (str: string) => str.replace(/[&<>"']/g, (tag) => ({
+      const escape = (str: string) => str.replace(/[&<>"]/g, (tag) => ({
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
         '"': '&quot;',
-        '\'': '&#39;'
       }[tag] || tag));
 
       // Replace template variables
       promptTemplate = promptTemplate
         .replace(/{{repoName}}/g, escape(repository.full_name))
-        .replace(/{{issueNumber}}/g, escape(issue.number.toString()))
-        .replace(/{{issueTitle}}/g, escape(issue.title))
-        .replace(/{{issueAuthor}}/g, escape(issue.user.login))
-        .replace(/{{issueState}}/g, escape(issue.state))
-        .replace(/{{issueUrl}}/g, escape(issue.html_url))
-        .replace(/{{issueDescription}}/g, escape(issue.body || 'No description provided'));
+        .replace(/{{prNumber}}/g, escape(pullRequest.number.toString()))
+        .replace(/{{prUrl}}/g, escape(pullRequest.html_url))
+        .replace(/{{headBranch}}/g, escape(pullRequest.head.ref));
 
-      // Handle comment section
       if (comment) {
         promptTemplate = promptTemplate
           .replace(/{{#comment}}/g, '')
           .replace(/{{\/comment}}/g, '')
-          .replace(/{{commentAuthor}}/g, escape(comment.user.login))
+          .replace(/{{filePath}}/g, escape(comment.path))
+          .replace(/{{diff}}/g, escape(comment.diff_hunk))
           .replace(/{{commentBody}}/g, escape(comment.body));
       } else {
-        // Remove comment section if no comment
         promptTemplate = promptTemplate.replace(/{{#comment}}[\s\S]*?{{\/comment}}/g, '');
+      }
+
+      if (review) {
+        promptTemplate = promptTemplate
+          .replace(/{{#review}}/g, '')
+          .replace(/{{\/review}}/g, '')
+          .replace(/{{reviewBody}}/g, escape(review.body));
+      } else {
+        promptTemplate = promptTemplate.replace(/{{#review}}[\s\S]*?{{\/review}}/g, '');
       }
 
       return promptTemplate;
     } catch (error) {
       this.logger.error(`Failed to load prompt template: ${error}`);
       // Fallback to simple prompt if template loading fails
-      return `# AI Helper - Issue Analysis and Code Generation\n\nAnalyze and implement solution for issue #${issue.number}: ${issue.title}\n\nRepository: ${repository.full_name}\nIssue: ${issue.body || 'No description provided'}\n${comment ? `\nComment: ${comment.body}` : ''}\n\nCreate a feature branch, implement the solution, and create a pull request.`;
+      return `# AI Helper - Review Response
+
+Implement the requested changes for PR #${pullRequest.number} in ${repository.full_name}`;
     }
   }
-}
-
-export function createIssueHandler(payload: GitHubIssuePayload) {
-  console.log('Processing issue event...');
-
-  const action = payload.action;
-  const issue = payload.issue;
-  const repository = payload.repository;
-
-  console.log(`Issue ${action}:`);
-  console.log(`- Repository: ${repository.full_name}`);
-  console.log(`- Issue #${issue.number}: ${issue.title}`);
-  console.log(`- Author: ${issue.user.login}`);
-  console.log(`- State: ${issue.state}`);
 }
