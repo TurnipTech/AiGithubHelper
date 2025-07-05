@@ -309,6 +309,7 @@ Environment variables you can set:
 | `AI_WORKING_DIR` | Directory for AI operations | `/tmp/ai-github-helper` | No |
 | `AI_PROVIDER` | AI provider to use (`claude`, `gemini`, `auto`) | `claude` | No |
 | `AI_FALLBACK_ENABLED` | Enable automatic fallback between providers | `false` | No |
+| `AUTO_FIX_REVIEWS` | Automatically trigger AI assistance when a pull request review requires changes | `false` | No |
 
 ### AI Provider Configuration
 

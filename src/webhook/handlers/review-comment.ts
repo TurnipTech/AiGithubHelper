@@ -153,12 +153,54 @@ export class ReviewCommentHandler {
     const aiHelperRegex = /(?:^|[^\w])@ai-helper\b/i;
     const aiHelperMentioned = review.body && aiHelperRegex.test(review.body);
 
-    if (!aiHelperMentioned) {
+    if (!aiHelperMentioned && !this.config.ai.autoFixReviews) {
       this.logger.info(
-        `AI helper not mentioned in pull request review for PR #${pullRequest.number}`,
+        `AI helper not mentioned in pull request review for PR #${pullRequest.number} and auto-fix reviews is disabled`,
       );
-      res.status(200).json({ message: 'AI helper not mentioned' });
+      res.status(200).json({ message: 'AI helper not mentioned and auto-fix reviews disabled' });
       return;
+    }
+
+    // Auto-fix reviews logic
+    if (!aiHelperMentioned && this.config.ai.autoFixReviews) {
+      if (review.state === 'changes_requested') {
+        // Check if the review body has substantive feedback
+        if (review.body && review.body.trim().length > 0) {
+          this.logger.info(
+            `Auto-fix reviews enabled and changes requested for PR #${pullRequest.number}. Posting AI helper comment.`,
+          );
+          await this.postAiHelperComment(
+            pullRequest.number,
+            repository.full_name,
+            '@ai-helper Please analyze this review and suggest fixes.',
+          );
+          res.status(200).json({
+            message: 'Auto-fix review triggered',
+            prNumber: pullRequest.number,
+            reviewId: review.id,
+          });
+          return;
+        } else {
+          this.logger.info(
+            `Auto-fix reviews enabled for PR #${pullRequest.number}, but review body is empty. Ignoring.`,
+          );
+          res.status(200).json({ message: 'Auto-fix reviews ignored due to empty review body' });
+          return;
+        }
+      } else {
+        this.logger.info(
+          `Auto-fix reviews enabled for PR #${pullRequest.number}, but review state is '${review.state}'. Ignoring.`,
+        );
+        res.status(200).json({ message: `Auto-fix reviews ignored due to review state: ${review.state}` });
+        return;
+      }
+    }
+
+    // If AI helper is explicitly mentioned, proceed with normal processing
+    if (aiHelperMentioned) {
+      this.logger.info(
+        `AI helper explicitly mentioned in pull request review for PR #${pullRequest.number}, starting response process`,
+      );
     }
 
     this.logger.info(
@@ -647,5 +689,49 @@ export class ReviewCommentHandler {
 
     // Start AI process with proper process management
     return await aiProvider.execute(prompt, repoPath);
+  }
+
+  private async postAiHelperComment(
+    prNumber: number,
+    repoFullName: string,
+    commentBody: string,
+  ): Promise<void> {
+    this.logger.info(`Posting AI helper comment to PR #${prNumber} in ${repoFullName}`);
+    return new Promise<void>((resolve, reject) => {
+      const ghComment = spawn(
+        'gh',
+        ['pr', 'comment', prNumber.toString(), '--repo', repoFullName, '--body', commentBody],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: false,
+        },
+      );
+
+      let commentOutput = '';
+      let commentError = '';
+
+      ghComment.stdout.on('data', (data) => {
+        commentOutput += data.toString();
+      });
+
+      ghComment.stderr.on('data', (data) => {
+        commentError += data.toString();
+      });
+
+      ghComment.on('close', (code) => {
+        if (code === 0) {
+          this.logger.info(`Successfully posted comment: ${commentOutput}`);
+          resolve();
+        } else {
+          this.logger.error(`Failed to post comment: ${commentError}`);
+          reject(new Error(`GitHub CLI comment failed with code ${code}: ${commentError}`));
+        }
+      });
+
+      ghComment.on('error', (error) => {
+        this.logger.error(`GitHub CLI comment spawn error: ${error.message}`);
+        reject(error);
+      });
+    });
   }
 }
