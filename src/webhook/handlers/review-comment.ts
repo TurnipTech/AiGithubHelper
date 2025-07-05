@@ -3,7 +3,7 @@ import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
 import { spawn, ChildProcess } from 'child_process';
 import { mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, normalize } from 'path';
 import { tmpdir } from 'os';
 import { AIProviderFactory } from '../../ai/factory';
 
@@ -187,32 +187,12 @@ export class ReviewCommentHandler {
     repository: GitHubRepository,
     comment: GitHubReviewComment,
   ): Promise<void> {
-    // Create a unique temporary working directory for this review comment
-    const tempWorkDir = resolve(
-      tmpdir(),
-      'ai-github-helper',
+    const workingDir = await this.setupWorkingDirectory(
       `review-comment-${comment.id}-${Date.now()}`,
     );
 
-    // Validate the temporary directory path to prevent directory traversal
-    if (!tempWorkDir.startsWith(resolve(tmpdir(), 'ai-github-helper'))) {
-      throw new Error('Invalid temporary directory path');
-    }
-
-    // Ensure temp directory exists
-    if (!existsSync(tempWorkDir)) {
-      mkdirSync(tempWorkDir, { recursive: true });
-    }
-
-    this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
-
     try {
-      // Clone the repository using GitHub CLI
-      const repoPath = resolve(tempWorkDir, this.sanitizeFilename(repository.name));
-      await this.cloneRepository(repository, repoPath);
-
-      // Checkout the PR branch
-      await this.checkoutPRBranch(repoPath, pullRequest);
+      const repoPath = await this.setupRepository(repository, pullRequest, workingDir);
 
       // Create a comprehensive prompt for review comment response
       const processedPrompt = this.createReviewCommentPrompt(pullRequest, repository, comment);
@@ -225,13 +205,13 @@ export class ReviewCommentHandler {
       const child = await this.executeAIProcess(processedPrompt, repoPath);
 
       // Set up cleanup handlers
-      this.setupCleanupHandlers(child, tempWorkDir);
+      this.setupCleanupHandlers(child, workingDir);
 
       this.logger.info(`AI review comment response started for PR #${pullRequest.number}`);
     } catch (error) {
       // Clean up on error
       try {
-        rmSync(tempWorkDir, { recursive: true, force: true });
+        rmSync(workingDir, { recursive: true, force: true });
       } catch (cleanupError) {
         this.logger.warn(`Failed to clean up temp directory: ${cleanupError}`);
       }
@@ -244,28 +224,10 @@ export class ReviewCommentHandler {
     repository: GitHubRepository,
     review: GitHubReview,
   ): Promise<void> {
-    // Create a unique temporary working directory for this review
-    const tempWorkDir = resolve(tmpdir(), 'ai-github-helper', `review-${review.id}-${Date.now()}`);
-
-    // Validate the temporary directory path to prevent directory traversal
-    if (!tempWorkDir.startsWith(resolve(tmpdir(), 'ai-github-helper'))) {
-      throw new Error('Invalid temporary directory path');
-    }
-
-    // Ensure temp directory exists
-    if (!existsSync(tempWorkDir)) {
-      mkdirSync(tempWorkDir, { recursive: true });
-    }
-
-    this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
+    const workingDir = await this.setupWorkingDirectory(`review-${review.id}-${Date.now()}`);
 
     try {
-      // Clone the repository using GitHub CLI
-      const repoPath = resolve(tempWorkDir, this.sanitizeFilename(repository.name));
-      await this.cloneRepository(repository, repoPath);
-
-      // Checkout the PR branch
-      await this.checkoutPRBranch(repoPath, pullRequest);
+      const repoPath = await this.setupRepository(repository, pullRequest, workingDir);
 
       // Create a comprehensive prompt for general review response
       const processedPrompt = this.createGeneralReviewPrompt(pullRequest, repository, review);
@@ -276,18 +238,56 @@ export class ReviewCommentHandler {
       const child = await this.executeAIProcess(processedPrompt, repoPath);
 
       // Set up cleanup handlers
-      this.setupCleanupHandlers(child, tempWorkDir);
+      this.setupCleanupHandlers(child, workingDir);
 
       this.logger.info(`AI review response started for PR #${pullRequest.number}`);
     } catch (error) {
       // Clean up on error
       try {
-        rmSync(tempWorkDir, { recursive: true, force: true });
+        rmSync(workingDir, { recursive: true, force: true });
       } catch (cleanupError) {
         this.logger.warn(`Failed to clean up temp directory: ${cleanupError}`);
       }
       throw error;
     }
+  }
+
+  private async setupWorkingDirectory(subdirectoryName: string): Promise<string> {
+    // Create a unique temporary working directory
+    const tempWorkDir = resolve(tmpdir(), 'ai-github-helper', subdirectoryName);
+
+    // Validate the temporary directory path to prevent directory traversal
+    const normalizedTempWorkDir = normalize(tempWorkDir);
+    const expectedBasePath = normalize(resolve(tmpdir(), 'ai-github-helper'));
+    if (
+      !normalizedTempWorkDir.startsWith(expectedBasePath + '/') &&
+      normalizedTempWorkDir !== expectedBasePath
+    ) {
+      throw new Error('Invalid temporary directory path');
+    }
+
+    // Ensure temp directory exists
+    if (!existsSync(tempWorkDir)) {
+      mkdirSync(tempWorkDir, { recursive: true });
+    }
+
+    this.logger.info(`Created temporary working directory: ${tempWorkDir}`);
+    return tempWorkDir;
+  }
+
+  private async setupRepository(
+    repository: GitHubRepository,
+    pullRequest: GitHubPullRequest,
+    workingDir: string,
+  ): Promise<string> {
+    // Clone the repository using GitHub CLI
+    const repoPath = resolve(workingDir, this.sanitizeFilename(repository.name));
+    await this.cloneRepository(repository, repoPath);
+
+    // Checkout the PR branch
+    await this.checkoutPRBranch(repoPath, pullRequest);
+
+    return repoPath;
   }
 
   private async cloneRepository(repository: GitHubRepository, repoPath: string): Promise<void> {
