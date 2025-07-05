@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Logger } from '../../utils/logger';
 import { Config } from '../../config';
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { mkdirSync, existsSync, readFileSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
@@ -194,6 +194,11 @@ export class ReviewCommentHandler {
       `review-comment-${comment.id}-${Date.now()}`,
     );
 
+    // Validate the temporary directory path to prevent directory traversal
+    if (!tempWorkDir.startsWith(resolve(tmpdir(), 'ai-github-helper'))) {
+      throw new Error('Invalid temporary directory path');
+    }
+
     // Ensure temp directory exists
     if (!existsSync(tempWorkDir)) {
       mkdirSync(tempWorkDir, { recursive: true });
@@ -216,12 +221,8 @@ export class ReviewCommentHandler {
         `Starting AI analysis for review comment ${comment.id} on PR #${pullRequest.number}`,
       );
 
-      // Get AI provider based on configuration
-      const aiProvider = await this.getAIProvider();
-      this.logger.info(`Using AI provider: ${aiProvider.name}`);
-
       // Start AI process with proper process management
-      const child = await aiProvider.execute(processedPrompt, repoPath);
+      const child = await this.executeAIProcess(processedPrompt, repoPath);
 
       // Set up cleanup handlers
       this.setupCleanupHandlers(child, tempWorkDir);
@@ -246,6 +247,11 @@ export class ReviewCommentHandler {
     // Create a unique temporary working directory for this review
     const tempWorkDir = resolve(tmpdir(), 'ai-github-helper', `review-${review.id}-${Date.now()}`);
 
+    // Validate the temporary directory path to prevent directory traversal
+    if (!tempWorkDir.startsWith(resolve(tmpdir(), 'ai-github-helper'))) {
+      throw new Error('Invalid temporary directory path');
+    }
+
     // Ensure temp directory exists
     if (!existsSync(tempWorkDir)) {
       mkdirSync(tempWorkDir, { recursive: true });
@@ -266,12 +272,8 @@ export class ReviewCommentHandler {
 
       this.logger.info(`Starting AI analysis for review ${review.id} on PR #${pullRequest.number}`);
 
-      // Get AI provider based on configuration
-      const aiProvider = await this.getAIProvider();
-      this.logger.info(`Using AI provider: ${aiProvider.name}`);
-
       // Start AI process with proper process management
-      const child = await aiProvider.execute(processedPrompt, repoPath);
+      const child = await this.executeAIProcess(processedPrompt, repoPath);
 
       // Set up cleanup handlers
       this.setupCleanupHandlers(child, tempWorkDir);
@@ -293,8 +295,10 @@ export class ReviewCommentHandler {
     this.logger.info(`Cloning repository ${sanitizedRepoName} to ${repoPath}`);
 
     return new Promise<void>((resolve, reject) => {
+      // Use array format to prevent command injection
       const ghClone = spawn('gh', ['repo', 'clone', sanitizedRepoName, repoPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false, // Explicitly disable shell to prevent command injection
       });
 
       let cloneOutput = '';
@@ -330,9 +334,11 @@ export class ReviewCommentHandler {
     this.logger.info(`Checking out PR branch ${sanitizedBranchName} in ${repoPath}`);
 
     return new Promise<void>((resolve, reject) => {
+      // Use array format to prevent command injection
       const gitCheckout = spawn('git', ['checkout', sanitizedBranchName], {
         cwd: repoPath,
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false, // Explicitly disable shell to prevent command injection
       });
 
       let checkoutOutput = '';
@@ -363,33 +369,43 @@ export class ReviewCommentHandler {
     });
   }
 
-  private setupCleanupHandlers(child: any, tempWorkDir: string): void {
+  private setupCleanupHandlers(child: ChildProcess, tempWorkDir: string): void {
     let isCleanedUp = false;
+    let cleanupMutex = false;
+
     const cleanup = () => {
-      if (isCleanedUp) return;
-      isCleanedUp = true;
+      // Use mutex to prevent race conditions
+      if (cleanupMutex || isCleanedUp) return;
+      cleanupMutex = true;
 
       try {
-        if (!child.killed) {
-          child.kill('SIGTERM');
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+
+        try {
+          if (child && !child.killed) {
+            child.kill('SIGTERM');
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to kill AI process: ${e}`);
         }
-      } catch (e) {
-        this.logger.warn(`Failed to kill AI process: ${e}`);
-      }
 
-      try {
-        rmSync(tempWorkDir, { recursive: true, force: true });
-        this.logger.info(`Cleaned up temp working directory: ${tempWorkDir}`);
-      } catch (e) {
-        this.logger.warn(`Failed to clean up temp working directory: ${tempWorkDir} - ${e}`);
-      }
+        try {
+          rmSync(tempWorkDir, { recursive: true, force: true });
+          this.logger.info(`Cleaned up temp working directory: ${tempWorkDir}`);
+        } catch (e) {
+          this.logger.warn(`Failed to clean up temp working directory: ${tempWorkDir} - ${e}`);
+        }
 
-      try {
-        process.off('exit', cleanup);
-        process.off('SIGINT', cleanup);
-        process.off('SIGTERM', cleanup);
-      } catch (e) {
-        this.logger.warn(`Failed to remove process listeners: ${e}`);
+        try {
+          process.off('exit', cleanup);
+          process.off('SIGINT', cleanup);
+          process.off('SIGTERM', cleanup);
+        } catch (e) {
+          this.logger.warn(`Failed to remove process listeners: ${e}`);
+        }
+      } finally {
+        cleanupMutex = false;
       }
     };
 
@@ -513,10 +529,15 @@ export class ReviewCommentHandler {
       throw new Error('Repository name must be a non-empty string');
     }
 
-    // Basic GitHub repository name validation
-    const repoNameRegex = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+    // Strict GitHub repository name validation
+    const repoNameRegex = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
     if (!repoNameRegex.test(fullName)) {
       throw new Error('Invalid repository name format');
+    }
+
+    // Additional security checks
+    if (fullName.includes('..') || fullName.includes('//') || fullName.length > 255) {
+      throw new Error('Repository name contains invalid patterns');
     }
 
     return fullName;
@@ -527,14 +548,28 @@ export class ReviewCommentHandler {
       throw new Error('Branch name must be a non-empty string');
     }
 
-    // Basic Git branch name validation
-    const branchNameRegex = /^[a-zA-Z0-9/_.-]+$/;
+    // Strict Git branch name validation following Git naming rules
+    const branchNameRegex = /^[a-zA-Z0-9][a-zA-Z0-9/_.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
     if (!branchNameRegex.test(branchName)) {
       throw new Error('Invalid branch name format');
     }
 
     // Prevent potentially dangerous branch names
-    if (branchName.includes('..') || branchName.startsWith('/') || branchName.endsWith('/')) {
+    if (
+      branchName.includes('..') ||
+      branchName.startsWith('/') ||
+      branchName.endsWith('/') ||
+      branchName.includes('//') ||
+      branchName.includes('~') ||
+      branchName.includes('^') ||
+      branchName.includes(':') ||
+      branchName.includes('?') ||
+      branchName.includes('*') ||
+      branchName.includes('[') ||
+      branchName.includes('\\') ||
+      branchName.includes(' ') ||
+      branchName.length > 255
+    ) {
       throw new Error('Branch name contains invalid characters');
     }
 
@@ -546,12 +581,30 @@ export class ReviewCommentHandler {
       throw new Error('Filename must be a non-empty string');
     }
 
-    // Remove dangerous characters and paths
+    // Strict validation first
+    if (
+      filename.includes('..') ||
+      filename.includes('/') ||
+      filename.includes('\\') ||
+      filename.includes(':') ||
+      filename.includes('*') ||
+      filename.includes('?') ||
+      filename.includes('"') ||
+      filename.includes('<') ||
+      filename.includes('>') ||
+      filename.includes('|') ||
+      filename.includes('\0') ||
+      filename.length > 255
+    ) {
+      throw new Error('Filename contains invalid characters');
+    }
+
+    // Only allow alphanumeric, dots, hyphens, underscores
     const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    // Prevent directory traversal
-    if (sanitized.includes('..') || sanitized.startsWith('/') || sanitized.startsWith('\\')) {
-      throw new Error('Filename contains invalid characters');
+    // Additional security checks
+    if (sanitized.length === 0 || sanitized.startsWith('.') || sanitized.endsWith('.')) {
+      throw new Error('Invalid filename format');
     }
 
     return sanitized;
@@ -562,7 +615,7 @@ export class ReviewCommentHandler {
       return '';
     }
 
-    // Escape special characters to prevent template injection
+    // Comprehensive escaping to prevent template injection and XSS
     return value
       .replace(/\\/g, '\\\\')
       .replace(/\$/g, '\\$')
@@ -572,7 +625,12 @@ export class ReviewCommentHandler {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/'/g, '&#39;')
+      .replace(/&/g, '&amp;')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t')
+      .replace(/\0/g, '\\0');
   }
 
   private async getAIProvider() {
@@ -580,5 +638,14 @@ export class ReviewCommentHandler {
       this.config.ai.preferredProvider,
       this.config.ai.fallbackEnabled,
     );
+  }
+
+  private async executeAIProcess(prompt: string, repoPath: string): Promise<ChildProcess> {
+    // Get AI provider based on configuration
+    const aiProvider = await this.getAIProvider();
+    this.logger.info(`Using AI provider: ${aiProvider.name}`);
+
+    // Start AI process with proper process management
+    return await aiProvider.execute(prompt, repoPath);
   }
 }
