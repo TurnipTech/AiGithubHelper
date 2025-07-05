@@ -1,6 +1,7 @@
 import express from 'express';
 import { PullRequestHandler } from './handlers/pull-request';
 import { IssueHandler } from './handlers/issue';
+import { ReviewCommentHandler } from './handlers/review-comment';
 import { createPushHandler } from './handlers/push';
 import { verifyWebhookSignature } from './middleware/auth';
 import { environment, validateEnvironment } from '../config/environment';
@@ -17,6 +18,7 @@ validateEnvironment();
 const logger = new Logger();
 const pullRequestHandler = new PullRequestHandler(logger, defaultConfig);
 const issueHandler = new IssueHandler(logger, defaultConfig);
+const reviewCommentHandler = new ReviewCommentHandler(logger, defaultConfig);
 
 app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), async (req, res) => {
   try {
@@ -35,6 +37,12 @@ app.post('/webhook', verifyWebhookSignature(environment.webhookSecret), async (r
         return; // Handler manages the response
       case 'issue_comment':
         await issueHandler.handleIssue(payload, req, res);
+        return; // Handler manages the response
+      case 'pull_request_review_comment':
+        await reviewCommentHandler.handleReviewComment(payload, req, res);
+        return; // Handler manages the response
+      case 'pull_request_review':
+        await reviewCommentHandler.handlePullRequestReview(payload, req, res);
         return; // Handler manages the response
       case 'push':
         createPushHandler(payload);

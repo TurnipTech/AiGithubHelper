@@ -52,6 +52,16 @@ export class IssueHandler {
     const repository = payload.repository;
     const comment = payload.comment; // For issue_comment events
 
+    // If the issue object has a pull_request key, it means this is a pull request comment
+    // and should be handled by the pull-request or review-comment handlers.
+    if ((issue as any).pull_request) {
+      this.logger.info(
+        `Ignoring issue_comment event for PR #${issue.number} as it's a pull request comment.`,
+      );
+      res.status(200).json({ message: 'Event ignored (pull request comment)' });
+      return;
+    }
+
     this.logger.info(
       `Processing issue ${action} event for #${issue.number} in ${repository.full_name}`,
     );
